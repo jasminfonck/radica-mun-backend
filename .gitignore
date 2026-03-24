@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+
+# Env
+.env
+*.env.local
+
+# Alembic — solo guardar versiones generadas, no el .gitkeep
+alembic/versions/*.py
+
+# Storage
+../storage/adjuntos/*
+../storage/constancias/*
+
+# IDE
+.vscode/
+.idea/
+*.DS_Store
