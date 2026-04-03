@@ -16,10 +16,14 @@ from app.modules.admin.models import (  # noqa: F401
     Rol, Usuario, Entidad, Dependencia, Canal,
     TipoRequerimiento, PlazoRespuesta, ConfiguracionSistema
 )
-# A medida que se agreguen modelos en otros módulos, importarlos aquí:
-# from app.modules.recepcion.models import Recepcion  # noqa: F401
-# from app.modules.remitente.models import Remitente  # noqa: F401
-# from app.modules.radicado.models import Radicado  # noqa: F401
+# Sprint 2
+from app.modules.recepcion.models import Recepcion, AdjuntoRecepcion  # noqa: F401
+# Sprint 3
+from app.modules.remitente.models import Remitente, MetadatosRecepcion  # noqa: F401
+# Sprint 4
+from app.modules.radicado.models import Radicado  # noqa: F401
+# Sprint 5
+from app.modules.consulta.models import LogAuditoria  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

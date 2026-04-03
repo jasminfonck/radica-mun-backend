@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.modules.auth.router import router as auth_router
 from app.modules.admin.router import router as admin_router
+from app.modules.recepcion.router import router as recepcion_router
+from app.modules.remitente.router import router as remitente_router
+from app.modules.radicado.router import router as radicado_router
+from app.modules.consulta.router import router as consulta_router
 
 app = FastAPI(
     title="Radica Mun",
@@ -21,13 +25,10 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(admin_router)
-
-# Aquí se registrarán los routers de cada módulo a medida que se desarrollen:
-# from app.modules.admin.router import router as admin_router
-# from app.modules.recepcion.router import router as recepcion_router
-# from app.modules.remitente.router import router as remitente_router
-# from app.modules.radicado.router import router as radicado_router
-# from app.modules.consulta.router import router as consulta_router
+app.include_router(recepcion_router)
+app.include_router(remitente_router)
+app.include_router(radicado_router)
+app.include_router(consulta_router)
 
 
 @app.get("/health", tags=["Sistema"])
