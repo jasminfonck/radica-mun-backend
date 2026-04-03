@@ -7,6 +7,7 @@ from app.modules.recepcion.router import router as recepcion_router
 from app.modules.remitente.router import router as remitente_router
 from app.modules.radicado.router import router as radicado_router
 from app.modules.consulta.router import router as consulta_router
+from app.modules.setup.router import router as setup_router
 
 app = FastAPI(
     title="Radica Mun",
@@ -30,6 +31,7 @@ app.include_router(recepcion_router)
 app.include_router(remitente_router)
 app.include_router(radicado_router)
 app.include_router(consulta_router)
+app.include_router(setup_router)
 
 
 @app.get("/health", tags=["Sistema"])
