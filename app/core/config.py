@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 480
 
     STORAGE_PATH: str = "../storage"
+    ALLOWED_ORIGINS: str = "http://localhost:4200"
 
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
