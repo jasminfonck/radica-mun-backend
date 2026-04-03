@@ -11,8 +11,6 @@ dist/
 .env
 *.env.local
 
-# Alembic — solo guardar versiones generadas, no el .gitkeep
-alembic/versions/*.py
 
 # Storage
 ../storage/adjuntos/*

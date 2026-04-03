@@ -17,11 +17,11 @@ ROLES = [
 
 @router.post("")
 def setup_inicial(db: Session = Depends(get_db)):
+    # Crear tablas si no existen (debe ir antes de cualquier query)
+    Base.metadata.create_all(bind=engine)
+
     if db.query(Rol).count() > 0:
         return {"ok": False, "mensaje": "El sistema ya fue inicializado"}
-
-    # Crear tablas si no existen (por si las migraciones no corrieron)
-    Base.metadata.create_all(bind=engine)
 
     # Crear roles
     roles_creados = []
