@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Any
+from typing import Optional, Any, List
 from datetime import datetime
 
 
@@ -85,6 +85,7 @@ class DependenciaOut(BaseModel):
 class CanalUpdate(BaseModel):
     activo: bool
     config_email: Optional[dict] = None
+    acuse_configurado: Optional[bool] = None
 
 class CanalOut(BaseModel):
     id: int
@@ -92,6 +93,7 @@ class CanalOut(BaseModel):
     tipo: str
     activo: bool
     config_email: Optional[Any]
+    acuse_configurado: bool
     model_config = {"from_attributes": True}
 
 
@@ -136,6 +138,8 @@ class ConfiguracionUpdate(BaseModel):
     prefijo_radicado: Optional[str] = Field(None, max_length=10)
     ruta_almacenamiento: Optional[str] = None
     color_primario: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    politica_privacidad_activa: Optional[bool] = None
+    politica_privacidad_texto: Optional[str] = None
 
 class ConfiguracionOut(BaseModel):
     id: int
@@ -145,4 +149,30 @@ class ConfiguracionOut(BaseModel):
     ruta_almacenamiento: Optional[str]
     color_primario: str
     sistema_listo: bool
+    politica_privacidad_activa: bool
+    politica_privacidad_texto: Optional[str]
     model_config = {"from_attributes": True}
+
+
+# ── BitacoraAuditoria ─────────────────────────────────────────────────────
+class BitacoraOut(BaseModel):
+    id: int
+    usuario_nombre: str
+    accion: str
+    entidad: str
+    entidad_id: Optional[int]
+    detalle: Optional[str]
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+# ── Respaldo ──────────────────────────────────────────────────────────────
+class RespaldoOut(BaseModel):
+    generado_en: datetime
+    entidad: Optional[dict]
+    configuracion: Optional[dict]
+    dependencias: List[dict]
+    canales: List[dict]
+    tipos_requerimiento: List[dict]
+    plazos_respuesta: List[dict]
+    total_usuarios: int

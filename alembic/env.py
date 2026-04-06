@@ -16,6 +16,7 @@ from app.modules.admin.models import (  # noqa: F401
     Rol, Usuario, Entidad, Dependencia, Canal,
     TipoRequerimiento, PlazoRespuesta, ConfiguracionSistema
 )
+from app.modules.geo.models import Departamento, Municipio  # noqa: F401
 # Sprint 2
 from app.modules.recepcion.models import Recepcion, AdjuntoRecepcion  # noqa: F401
 # Sprint 3

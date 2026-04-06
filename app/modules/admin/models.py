@@ -4,6 +4,21 @@ from datetime import datetime
 from app.db.base import Base
 
 
+class BitacoraAuditoria(Base):
+    __tablename__ = "bitacora_auditoria"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    usuario_nombre = Column(String(100), nullable=False)
+    accion = Column(String(100), nullable=False)       # ej. "crear_usuario", "actualizar_canal"
+    entidad = Column(String(100), nullable=False)      # ej. "Usuario", "Canal"
+    entidad_id = Column(Integer, nullable=True)
+    detalle = Column(Text, nullable=True)              # JSON serializado con valor anterior/nuevo
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+
+
 class Rol(Base):
     __tablename__ = "roles"
 
@@ -67,6 +82,7 @@ class Canal(Base):
     tipo = Column(String(20), nullable=False)   # presencial | digital | email
     activo = Column(Boolean, default=False, nullable=False)
     config_email = Column(JSON, nullable=True)  # {host, port, user, password, from}
+    acuse_configurado = Column(Boolean, default=False, nullable=False)  # RN-20: requerido para canal digital
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -103,4 +119,7 @@ class ConfiguracionSistema(Base):
     ruta_almacenamiento = Column(String(500), default="../storage")
     color_primario = Column(String(7), default="#1a237e")
     sistema_listo = Column(Boolean, default=False, nullable=False)
+    # RN-19: política de privacidad obligatoria (Ley 1581/2012)
+    politica_privacidad_activa = Column(Boolean, default=False, nullable=False)
+    politica_privacidad_texto = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
