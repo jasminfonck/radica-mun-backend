@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.dependencies import get_db, get_current_user
+from app.modules.admin.models import Usuario
 from app.modules.remitente import service
 from app.modules.remitente.schemas import (
     RemitenteCreate, RemitenteUpdate, RemitenteOut, RemitenteResumen,
@@ -52,20 +53,24 @@ def obtener(
 @router.post("", response_model=RemitenteOut, status_code=201)
 def crear(
     data: RemitenteCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    return service.crear_remitente(db, data)
+    ip = request.client.host if request.client else None
+    return service.crear_remitente(db, data, current_user.id, ip)
 
 
 @router.put("/{remitente_id}", response_model=RemitenteOut)
 def actualizar(
     remitente_id: int,
     data: RemitenteUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    return service.actualizar_remitente(db, remitente_id, data)
+    ip = request.client.host if request.client else None
+    return service.actualizar_remitente(db, remitente_id, data, current_user.id, ip)
 
 
 # ── Metadatos de Recepción ────────────────────────────────────────────────────
@@ -83,17 +88,21 @@ def obtener_metadatos(
 def guardar_metadatos(
     recepcion_id: int,
     data: MetadatosCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    return service.crear_o_actualizar_metadatos(db, recepcion_id, data)
+    ip = request.client.host if request.client else None
+    return service.crear_o_actualizar_metadatos(db, recepcion_id, data, current_user.id, ip)
 
 
 @router.put("/metadatos/{metadatos_id}", response_model=MetadatosOut)
 def actualizar_metadatos(
     metadatos_id: int,
     data: MetadatosUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    return service.actualizar_metadatos(db, metadatos_id, data)
+    ip = request.client.host if request.client else None
+    return service.actualizar_metadatos(db, metadatos_id, data, current_user.id, ip)

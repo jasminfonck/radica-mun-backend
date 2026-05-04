@@ -64,6 +64,7 @@ def crear_usuario(db: Session, data: UsuarioCreate, actor_id: int, actor_nombre:
         not_found("Rol")
     usuario = Usuario(
         nombre=data.nombre,
+        apellido=data.apellido,
         email=data.email,
         password_hash=hash_password(data.password),
         rol_id=data.rol_id,

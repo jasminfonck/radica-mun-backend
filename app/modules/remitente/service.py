@@ -8,6 +8,7 @@ from app.modules.remitente.schemas import (
     RemitenteCreate, RemitenteUpdate,
     MetadatosCreate, MetadatosUpdate,
 )
+from app.modules.consulta.service import registrar_evento
 
 
 # ── Remitente ─────────────────────────────────────────────────────────────────
@@ -68,20 +69,48 @@ def obtener_remitente(db: Session, remitente_id: int) -> Remitente:
     return r
 
 
-def crear_remitente(db: Session, data: RemitenteCreate) -> Remitente:
+def crear_remitente(
+    db: Session,
+    data: RemitenteCreate,
+    usuario_id: Optional[int] = None,
+    ip: Optional[str] = None,
+) -> Remitente:
     remitente = Remitente(**data.model_dump())
     db.add(remitente)
+    db.flush()
+    registrar_evento(
+        db,
+        accion="crear_remitente",
+        entidad="remitentes",
+        entidad_id=remitente.id,
+        descripcion=f"Remitente creado: {remitente.nombre_completo}",
+        usuario_id=usuario_id,
+        ip=ip,
+    )
     db.commit()
     db.refresh(remitente)
     return remitente
 
 
 def actualizar_remitente(
-    db: Session, remitente_id: int, data: RemitenteUpdate
+    db: Session,
+    remitente_id: int,
+    data: RemitenteUpdate,
+    usuario_id: Optional[int] = None,
+    ip: Optional[str] = None,
 ) -> Remitente:
     remitente = obtener_remitente(db, remitente_id)
     for campo, valor in data.model_dump(exclude_unset=True).items():
         setattr(remitente, campo, valor)
+    registrar_evento(
+        db,
+        accion="editar_remitente",
+        entidad="remitentes",
+        entidad_id=remitente_id,
+        descripcion=f"Remitente editado: {remitente.nombre_completo}",
+        usuario_id=usuario_id,
+        ip=ip,
+    )
     db.commit()
     db.refresh(remitente)
     return remitente
@@ -98,36 +127,76 @@ def obtener_metadatos(db: Session, recepcion_id: int) -> Optional[MetadatosRecep
 
 
 def crear_o_actualizar_metadatos(
-    db: Session, recepcion_id: int, data: MetadatosCreate
+    db: Session,
+    recepcion_id: int,
+    data: MetadatosCreate,
+    usuario_id: Optional[int] = None,
+    ip: Optional[str] = None,
 ) -> MetadatosRecepcion:
-    # Verificar que el remitente existe
     if not db.get(Remitente, data.remitente_id):
         raise HTTPException(status_code=404, detail="Remitente no encontrado")
+
+    if not data.tipo_requerimiento_id:
+        raise HTTPException(status_code=400, detail="El tipo de requerimiento es obligatorio")
+    if not data.plazo_respuesta_id:
+        raise HTTPException(status_code=400, detail="El plazo de respuesta es obligatorio")
 
     existente = obtener_metadatos(db, recepcion_id)
 
     if existente:
         for campo, valor in data.model_dump(exclude_unset=True).items():
             setattr(existente, campo, valor)
+        registrar_evento(
+            db,
+            accion="editar_metadatos",
+            entidad="metadatos_recepcion",
+            entidad_id=existente.id,
+            descripcion=f"Metadatos actualizados para recepción {recepcion_id}",
+            usuario_id=usuario_id,
+            ip=ip,
+        )
         db.commit()
         db.refresh(existente)
         return existente
 
     metadatos = MetadatosRecepcion(recepcion_id=recepcion_id, **data.model_dump())
     db.add(metadatos)
+    db.flush()
+    registrar_evento(
+        db,
+        accion="crear_metadatos",
+        entidad="metadatos_recepcion",
+        entidad_id=metadatos.id,
+        descripcion=f"Metadatos creados para recepción {recepcion_id}",
+        usuario_id=usuario_id,
+        ip=ip,
+    )
     db.commit()
     db.refresh(metadatos)
     return metadatos
 
 
 def actualizar_metadatos(
-    db: Session, metadatos_id: int, data: MetadatosUpdate
+    db: Session,
+    metadatos_id: int,
+    data: MetadatosUpdate,
+    usuario_id: Optional[int] = None,
+    ip: Optional[str] = None,
 ) -> MetadatosRecepcion:
     m = db.get(MetadatosRecepcion, metadatos_id)
     if not m:
         raise HTTPException(status_code=404, detail="Metadatos no encontrados")
     for campo, valor in data.model_dump(exclude_unset=True).items():
         setattr(m, campo, valor)
+    registrar_evento(
+        db,
+        accion="editar_metadatos",
+        entidad="metadatos_recepcion",
+        entidad_id=metadatos_id,
+        descripcion=f"Metadatos {metadatos_id} actualizados",
+        usuario_id=usuario_id,
+        ip=ip,
+    )
     db.commit()
     db.refresh(m)
     return m

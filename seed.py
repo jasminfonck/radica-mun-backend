@@ -17,7 +17,8 @@ ROLES = [
 ]
 
 ADMIN_DEFAULT = {
-    "nombre": "Administrador del Sistema",
+    "nombre": "Administrador",
+    "apellido": "Sistema",
     "email": "admin@radica.local",
     "password": "Radica2025*",
 }
@@ -71,6 +72,7 @@ def seed_roles_y_admin(db):
         rol_admin = db.query(Rol).filter(Rol.nombre == "administrador").first()
         db.add(Usuario(
             nombre=ADMIN_DEFAULT["nombre"],
+            apellido=ADMIN_DEFAULT["apellido"],
             email=ADMIN_DEFAULT["email"],
             password_hash=hash_password(ADMIN_DEFAULT["password"]),
             rol_id=rol_admin.id,

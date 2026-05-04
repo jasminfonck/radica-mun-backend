@@ -28,6 +28,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
         usuario=UsuarioToken(
             id=user.id,
             nombre=user.nombre,
+            apellido=user.apellido,
             email=user.email,
             rol=user.rol.nombre,
         )
@@ -39,6 +40,7 @@ def get_me(current_user: Usuario = Depends(get_current_user)):
     return UsuarioToken(
         id=current_user.id,
         nombre=current_user.nombre,
+        apellido=current_user.apellido,
         email=current_user.email,
         rol=current_user.rol.nombre,
     )

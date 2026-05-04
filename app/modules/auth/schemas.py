@@ -9,6 +9,7 @@ class LoginRequest(BaseModel):
 class UsuarioToken(BaseModel):
     id: int
     nombre: str
+    apellido: str | None = None
     email: str
     rol: str
 

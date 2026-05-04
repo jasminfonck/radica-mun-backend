@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Request, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -6,7 +6,8 @@ from app.core.dependencies import get_db, get_current_user, require_rol
 from app.modules.admin.models import Usuario
 from app.modules.recepcion import service
 from app.modules.recepcion.schemas import (
-    RecepcionCreate, RecepcionUpdate, RecepcionOut, AdjuntoOut
+    RecepcionCreate, RecepcionUpdate, RecepcionOut, AdjuntoOut,
+    FormularioPublicoCreate, FormularioPublicoOut, InfoPublicaOut,
 )
 
 router = APIRouter(prefix="/recepcion", tags=["Recepción"])
@@ -22,6 +23,12 @@ def listar(
     _=Depends(get_current_user),
 ):
     return service.listar_recepciones(db, canal_id, estado, fecha_desde, fecha_hasta)
+
+
+# Rutas estáticas /publica/* deben ir ANTES de /{recepcion_id}
+@router.get("/publica/info", response_model=InfoPublicaOut)
+def info_publica(db: Session = Depends(get_db)):
+    return service.get_info_publica(db)
 
 
 @router.get("/{recepcion_id}", response_model=RecepcionOut)
@@ -41,20 +48,54 @@ def crear(
 
 
 # Endpoint público para formulario web (ciudadano sin autenticación)
-@router.post("/publica", response_model=RecepcionOut)
-def crear_publica(data: RecepcionCreate, request: Request, db: Session = Depends(get_db)):
+# Usa multipart/form-data para soportar adjuntos opcionales
+@router.post("/publica", response_model=FormularioPublicoOut)
+async def crear_publica(
+    request: Request,
+    tipo_persona:          str           = Form("natural"),
+    nombres:               Optional[str] = Form(None),
+    apellidos:             Optional[str] = Form(None),
+    razon_social:          Optional[str] = Form(None),
+    tipo_identificacion:   Optional[str] = Form(None),
+    numero_identificacion: Optional[str] = Form(None),
+    email:                 Optional[str] = Form(None),
+    telefono:              Optional[str] = Form(None),
+    asunto:                str           = Form(...),
+    tipo_requerimiento_id: Optional[int] = Form(None),
+    observaciones:         Optional[str] = Form(None),
+    acepta_politica:       bool          = Form(False),
+    adjuntos: List[UploadFile]           = File(default=[]),
+    db: Session = Depends(get_db),
+):
     ip = request.client.host if request.client else None
-    return service.crear_recepcion(db, data, usuario_id=None, ip=ip)
+    service.check_rate_limit(ip or "unknown")
+    data = FormularioPublicoCreate(
+        tipo_persona=tipo_persona,
+        nombres=nombres,
+        apellidos=apellidos,
+        razon_social=razon_social,
+        tipo_identificacion=tipo_identificacion,
+        numero_identificacion=numero_identificacion,
+        email=email,
+        telefono=telefono,
+        asunto=asunto,
+        tipo_requerimiento_id=tipo_requerimiento_id,
+        observaciones=observaciones,
+        acepta_politica=acepta_politica,
+    )
+    return await service.crear_desde_formulario(db, data, ip, adjuntos)
 
 
 @router.put("/{recepcion_id}", response_model=RecepcionOut)
 def actualizar(
     recepcion_id: int,
     data: RecepcionUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
 ):
-    return service.actualizar_recepcion(db, recepcion_id, data)
+    ip = request.client.host if request.client else None
+    return service.actualizar_recepcion(db, recepcion_id, data, current_user.id, ip)
 
 
 @router.post("/{recepcion_id}/adjuntos", response_model=AdjuntoOut)

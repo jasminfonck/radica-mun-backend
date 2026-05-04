@@ -14,19 +14,22 @@ class RolOut(BaseModel):
 # ── Usuario ───────────────────────────────────────────────────────────────
 class UsuarioCreate(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=100)
-    email: str = Field(..., min_length=5)
+    apellido: Optional[str] = Field(None, max_length=100)
+    email: EmailStr
     password: str = Field(..., min_length=6)
     rol_id: int
 
 class UsuarioUpdate(BaseModel):
     nombre: Optional[str] = Field(None, min_length=2, max_length=100)
-    email: Optional[str] = None
+    apellido: Optional[str] = Field(None, max_length=100)
+    email: Optional[EmailStr] = None
     rol_id: Optional[int] = None
     activo: Optional[bool] = None
 
 class UsuarioOut(BaseModel):
     id: int
     nombre: str
+    apellido: Optional[str]
     email: str
     activo: bool
     rol: RolOut
