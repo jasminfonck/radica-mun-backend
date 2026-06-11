@@ -19,10 +19,11 @@ router = APIRouter(prefix="/remitente", tags=["Remitente"])
 def buscar(
     q:            Optional[str] = Query(None, description="Nombre, identificación o email"),
     tipo_persona: Optional[str] = Query(None),
+    solo_activos: bool          = Query(True),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    return service.buscar_remitentes(db, q=q, tipo_persona=tipo_persona)
+    return service.buscar_remitentes(db, q=q, tipo_persona=tipo_persona, solo_activos=solo_activos)
 
 
 @router.get("/duplicados", response_model=List[RemitenteResumen])

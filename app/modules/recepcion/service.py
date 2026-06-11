@@ -1,9 +1,10 @@
 import os
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -23,11 +24,11 @@ _RATE_STORE: dict[str, list[datetime]] = defaultdict(list)
 _RATE_MAX    = 5
 _RATE_WINDOW = timedelta(hours=1)
 
-ESTADOS_REQUIEREN_OBS = {"incompleto", "incompetente"}
+ESTADOS_REQUIEREN_OBS = {"incompleto", "no_competente"}
 
 
 def check_rate_limit(ip: str) -> None:
-    ahora   = datetime.utcnow()
+    ahora   = datetime.now(timezone.utc)
     ventana = ahora - _RATE_WINDOW
     recientes = [t for t in _RATE_STORE[ip] if t > ventana]
     _RATE_STORE[ip] = recientes
@@ -74,10 +75,21 @@ def crear_recepcion(db: Session, data: RecepcionCreate, usuario_id: Optional[int
         canal_id=data.canal_id,
         asunto_provisional=data.asunto_provisional,
         observaciones=data.observaciones,
+        email_remitente=data.email_remitente,
         recibido_por_id=usuario_id,
         ip_origen=ip,
     )
     db.add(recepcion)
+    db.flush()
+    registrar_evento(
+        db,
+        accion="crear_recepcion",
+        modulo="recepciones",
+        modulo_id=recepcion.id,
+        descripcion=f"Recepción creada por canal '{canal.nombre}'",
+        usuario_id=usuario_id,
+        ip=ip,
+    )
     db.commit()
     db.refresh(recepcion)
     return recepcion
@@ -90,10 +102,19 @@ def actualizar_recepcion(
     usuario_id: Optional[int] = None,
     ip: Optional[str] = None,
 ) -> Recepcion:
+    from fastapi import HTTPException
+    from app.modules.radicado.models import Radicado
+
     recepcion = obtener_recepcion(db, recepcion_id)
 
     if data.estado and data.estado not in ESTADOS_VALIDOS:
         bad_request(f"Estado no válido. Use uno de: {', '.join(ESTADOS_VALIDOS)}")
+
+    if data.estado and db.query(Radicado).filter(Radicado.recepcion_id == recepcion_id).first():
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede cambiar el estado de una recepción que ya fue radicada",
+        )
 
     if data.estado in ESTADOS_REQUIEREN_OBS and not data.observaciones:
         bad_request(
@@ -122,8 +143,22 @@ def actualizar_recepcion(
     return recepcion
 
 
-async def guardar_adjunto(db: Session, recepcion_id: int, archivo: UploadFile) -> AdjuntoRecepcion:
-    recepcion = obtener_recepcion(db, recepcion_id)
+async def guardar_adjunto(
+    db: Session,
+    recepcion_id: int,
+    archivo: UploadFile,
+    fase_creacion: bool = False,
+) -> AdjuntoRecepcion:
+    from fastapi import HTTPException
+
+    obtener_recepcion(db, recepcion_id)  # valida existencia
+
+    if not fase_creacion:
+        raise HTTPException(
+            status_code=403,
+            detail="No se pueden agregar adjuntos después de creada la recepción. "
+                   "Los documentos solo se adjuntan durante el registro inicial.",
+        )
 
     # Crear carpeta si no existe
     carpeta = os.path.join(settings.STORAGE_PATH, "adjuntos", str(recepcion_id))
@@ -148,9 +183,31 @@ async def guardar_adjunto(db: Session, recepcion_id: int, archivo: UploadFile) -
         tamano_bytes=len(contenido),
     )
     db.add(adjunto)
+    registrar_evento(
+        db,
+        accion="subir_adjunto",
+        modulo="recepciones",
+        modulo_id=recepcion_id,
+        descripcion=f"Adjunto '{archivo.filename}' subido a recepción #{recepcion_id}",
+        usuario_id=None,
+        ip=None,
+    )
     db.commit()
     db.refresh(adjunto)
     return adjunto
+
+
+def descargar_adjunto(db: Session, adjunto_id: int) -> FileResponse:
+    adjunto = db.query(AdjuntoRecepcion).filter(AdjuntoRecepcion.id == adjunto_id).first()
+    if not adjunto:
+        not_found("Adjunto")
+    if not os.path.exists(adjunto.ruta):
+        bad_request("El archivo no está disponible en el servidor")
+    return FileResponse(
+        path=adjunto.ruta,
+        filename=adjunto.nombre_original,
+        media_type=adjunto.tipo_mime or "application/octet-stream",
+    )
 
 
 def eliminar_adjunto(db: Session, adjunto_id: int) -> None:
@@ -159,7 +216,18 @@ def eliminar_adjunto(db: Session, adjunto_id: int) -> None:
         not_found("Adjunto")
     if os.path.exists(adjunto.ruta):
         os.remove(adjunto.ruta)
+    recepcion_id = adjunto.recepcion_id
+    nombre_original = adjunto.nombre_original
     db.delete(adjunto)
+    registrar_evento(
+        db,
+        accion="eliminar_adjunto",
+        modulo="recepciones",
+        modulo_id=recepcion_id,
+        descripcion=f"Adjunto '{nombre_original}' eliminado de recepción #{recepcion_id}",
+        usuario_id=None,
+        ip=None,
+    )
     db.commit()
 
 
@@ -227,6 +295,8 @@ async def crear_desde_formulario(
             razon_social=data.razon_social,
             tipo_identificacion=data.tipo_identificacion,
             numero_identificacion=data.numero_identificacion,
+            nit=data.numero_identificacion if data.tipo_identificacion == "NIT" else None,
+            digito_verificacion=data.digito_verificacion,
             email=data.email,
             telefono=data.telefono,
         )

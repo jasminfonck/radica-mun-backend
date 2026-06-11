@@ -10,10 +10,12 @@ class ConsultaPublicaOut(BaseModel):
     fecha_radicacion: datetime
     asunto:           str
     dependencia:      str
+    canal:            str
     estado_radicado:  str
     estado_recepcion: str
     tipo_soporte:     str
     remitente:        str
+    url_constancia:   Optional[str] = None
 
 
 # ── Búsqueda interna ──────────────────────────────────────────────────────────
@@ -25,6 +27,7 @@ class ResultadoBusqueda(BaseModel):
     fecha_radicacion: datetime
     asunto:          str
     remitente:       str
+    canal:           str
     dependencia:     str
     estado_radicado: str
     estado_recepcion: str
@@ -60,8 +63,8 @@ class LogAuditoriaOut(BaseModel):
     id:          int
     usuario:     Optional[UsuarioResumen]
     accion:      str
-    entidad:     Optional[str]
-    entidad_id:  Optional[int]
+    modulo:      Optional[str]
+    modulo_id:   Optional[int]
     descripcion: Optional[str]
     ip:          Optional[str]
     created_at:  datetime

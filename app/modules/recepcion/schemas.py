@@ -1,8 +1,9 @@
-from pydantic import BaseModel, field_validator
+import re
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 
-ESTADOS_VALIDOS = ["recibido", "en_revision", "pendiente", "incompleto", "incompetente"]
+ESTADOS_VALIDOS = ["recibido", "en_revision", "pendiente", "incompleto", "no_competente", "competente"]
 
 
 class AdjuntoOut(BaseModel):
@@ -18,6 +19,7 @@ class RecepcionCreate(BaseModel):
     canal_id: int
     asunto_provisional: Optional[str] = None
     observaciones: Optional[str] = None
+    email_remitente: Optional[str] = None
 
 
 class RecepcionUpdate(BaseModel):
@@ -44,6 +46,7 @@ class RecepcionOut(BaseModel):
     canal: CanalResumen
     asunto_provisional: Optional[str]
     observaciones: Optional[str]
+    email_remitente: Optional[str]
     estado: str
     recibido_por: Optional[UsuarioResumen]
     created_at: datetime
@@ -91,6 +94,7 @@ class FormularioPublicoCreate(BaseModel):
     razon_social: Optional[str] = None
     tipo_identificacion: Optional[str] = None
     numero_identificacion: Optional[str] = None
+    digito_verificacion: Optional[str] = None
     email: Optional[str] = None
     telefono: Optional[str] = None
     # Documento
@@ -106,6 +110,46 @@ class FormularioPublicoCreate(BaseModel):
         if v not in ("natural", "juridico"):
             raise ValueError("tipo_persona debe ser 'natural' o 'juridico'")
         return v
+
+    @field_validator("telefono")
+    @classmethod
+    def validar_telefono(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return v
+        digitos = re.sub(r"\D", "", v)
+        if len(digitos) < 7 or len(digitos) > 10:
+            raise ValueError("El teléfono debe tener entre 7 y 10 dígitos")
+        return digitos
+
+    @field_validator("numero_identificacion")
+    @classmethod
+    def validar_numero_identificacion(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return v
+        v = v.strip()
+        if len(v) < 3 or len(v) > 20:
+            raise ValueError("El número de identificación debe tener entre 3 y 20 caracteres")
+        return v
+
+    @model_validator(mode="after")
+    def validar_numero_por_tipo(self) -> "FormularioPublicoCreate":
+        num = self.numero_identificacion
+        tipo = self.tipo_identificacion
+        if not num or not tipo:
+            return self
+        if tipo == "CC":
+            if not re.fullmatch(r"\d{5,10}", num):
+                raise ValueError("La cédula de ciudadanía debe tener entre 5 y 10 dígitos")
+        elif tipo == "NIT":
+            if not re.fullmatch(r"\d{7,15}", num):
+                raise ValueError("El NIT debe tener entre 7 y 15 dígitos (sin dígito de verificación)")
+            dv = self.digito_verificacion
+            if dv is not None and dv != "" and not re.fullmatch(r"\d", dv):
+                raise ValueError("El dígito de verificación debe ser un único dígito numérico")
+        elif tipo == "CE":
+            if not re.fullmatch(r"[A-Za-z0-9]{4,15}", num):
+                raise ValueError("La cédula de extranjería debe tener entre 4 y 15 caracteres alfanuméricos")
+        return self
 
 
 class FormularioPublicoOut(BaseModel):

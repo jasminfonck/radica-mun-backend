@@ -1,0 +1,14 @@
+Collecting reportlab
+  Downloading reportlab-4.4.10-py3-none-any.whl.metadata (1.7 kB)
+Collecting pillow>=9.0.0 (from reportlab)
+  Downloading pillow-12.1.1-cp314-cp314-win_amd64.whl.metadata (9.0 kB)
+Collecting charset-normalizer (from reportlab)
+  Downloading charset_normalizer-3.4.6-cp314-cp314-win_amd64.whl.metadata (41 kB)
+Downloading reportlab-4.4.10-py3-none-any.whl (2.0 MB)
+   --------------------------------------- 2.0/2.0 MB 2.3 MB/s  0:00:00
+Downloading pillow-12.1.1-cp314-cp314-win_amd64.whl (7.2 MB)
+   --------------------------------------- 7.2/7.2 MB 2.3 MB/s  0:00:03
+Downloading charset_normalizer-3.4.6-cp314-cp314-win_amd64.whl (154 kB)
+Installing collected packages: pillow, charset-normalizer, reportlab
+
+Successfully installed charset-normalizer-3.4.6 pillow-12.1.1 reportlab-4.4.10

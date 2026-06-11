@@ -11,16 +11,18 @@ class RemitenteCreate(BaseModel):
     apellidos: Optional[str] = None
 
     # Persona jurídica
-    razon_social: Optional[str] = None
-    nit:          Optional[str] = None
+    razon_social:        Optional[str] = None
+    nit:                 Optional[str] = None
+    digito_verificacion: Optional[str] = None
 
     # Compartidos
-    tipo_identificacion:   Optional[str] = None   # CC | CE | NIT | PP | otro
+    tipo_identificacion:   Optional[str] = None   # CC | CE | NIT | PP
     numero_identificacion: Optional[str] = None
-    email:     Optional[str] = None
-    telefono:  Optional[str] = None
-    direccion: Optional[str] = None
-    municipio: Optional[str] = None
+    email:        Optional[str] = None
+    telefono:     Optional[str] = None
+    direccion:    Optional[str] = None
+    municipio:    Optional[str] = None
+    departamento: Optional[str] = None
 
     @field_validator("tipo_persona")
     @classmethod
@@ -31,17 +33,18 @@ class RemitenteCreate(BaseModel):
 
 
 class RemitenteUpdate(BaseModel):
+    """Campos editables — tipo_persona, tipo_identificacion y numero_identificacion son inmutables."""
     nombres:   Optional[str] = None
     apellidos: Optional[str] = None
-    razon_social: Optional[str] = None
-    nit:          Optional[str] = None
-    tipo_identificacion:   Optional[str] = None
-    numero_identificacion: Optional[str] = None
-    email:     Optional[str] = None
-    telefono:  Optional[str] = None
-    direccion: Optional[str] = None
-    municipio: Optional[str] = None
-    activo:    Optional[bool] = None
+    razon_social:        Optional[str] = None
+    nit:                 Optional[str] = None
+    digito_verificacion: Optional[str] = None
+    email:        Optional[str] = None
+    telefono:     Optional[str] = None
+    direccion:    Optional[str] = None
+    municipio:    Optional[str] = None
+    departamento: Optional[str] = None
+    activo:       Optional[bool] = None
 
 
 class RemitenteOut(BaseModel):
@@ -49,15 +52,17 @@ class RemitenteOut(BaseModel):
     tipo_persona: str
     nombres:   Optional[str]
     apellidos: Optional[str]
-    razon_social: Optional[str]
-    nit:          Optional[str]
+    razon_social:        Optional[str]
+    nit:                 Optional[str]
+    digito_verificacion: Optional[str]
     tipo_identificacion:   Optional[str]
     numero_identificacion: Optional[str]
-    email:     Optional[str]
-    telefono:  Optional[str]
-    direccion: Optional[str]
-    municipio: Optional[str]
-    activo:    bool
+    email:        Optional[str]
+    telefono:     Optional[str]
+    direccion:    Optional[str]
+    municipio:    Optional[str]
+    departamento: Optional[str]
+    activo:       bool
     nombre_completo: str
     created_at: datetime
     model_config = {"from_attributes": True}
@@ -70,6 +75,7 @@ class RemitenteResumen(BaseModel):
     numero_identificacion: Optional[str]
     email: Optional[str]
     telefono: Optional[str]
+    activo: bool = True
     model_config = {"from_attributes": True}
 
 

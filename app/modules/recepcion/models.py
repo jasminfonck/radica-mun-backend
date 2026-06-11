@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db.base import Base
 
 
@@ -16,9 +16,10 @@ class Recepcion(Base):
     # Datos iniciales del documento
     asunto_provisional = Column(String(300))
     observaciones      = Column(Text)
+    email_remitente    = Column(String(200), nullable=True)
 
     # Estado
-    # recibido | en_revision | pendiente | incompleto | incompetente
+    # recibido | en_revision | pendiente | incompleto | no_competente
     estado = Column(String(30), default="recibido", nullable=False)
 
     # Trazabilidad
@@ -26,8 +27,8 @@ class Recepcion(Base):
     recibido_por    = relationship("Usuario")
     ip_origen       = Column(String(45))  # para formulario web
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)
 
     adjuntos = relationship("AdjuntoRecepcion", back_populates="recepcion", cascade="all, delete-orphan")
 
@@ -42,6 +43,6 @@ class AdjuntoRecepcion(Base):
     ruta            = Column(String(500), nullable=False)
     tipo_mime       = Column(String(100))
     tamano_bytes    = Column(Integer)
-    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     recepcion = relationship("Recepcion", back_populates="adjuntos")

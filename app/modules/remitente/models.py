@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db.base import Base
 
 
@@ -17,8 +17,9 @@ class Remitente(Base):
     apellidos  = Column(String(100))
 
     # Persona jurídica
-    razon_social = Column(String(200))
-    nit          = Column(String(20))
+    razon_social        = Column(String(200))
+    nit                 = Column(String(20))
+    digito_verificacion = Column(String(2), nullable=True)
 
     # Compartidos
     tipo_identificacion = Column(String(30))   # CC | CE | NIT | PP | otro
@@ -26,11 +27,12 @@ class Remitente(Base):
     email     = Column(String(100), index=True)
     telefono  = Column(String(20))
     direccion = Column(String(200))
-    municipio = Column(String(100))
+    municipio    = Column(String(100))
+    departamento = Column(String(100), nullable=True)
 
     activo     = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)
 
     metadatos = relationship("MetadatosRecepcion", back_populates="remitente")
 
@@ -60,8 +62,8 @@ class MetadatosRecepcion(Base):
     numero_referencia   = Column(String(100))
     fecha_documento     = Column(DateTime)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)
 
     remitente          = relationship("Remitente", back_populates="metadatos")
     tipo_requerimiento = relationship("TipoRequerimiento")

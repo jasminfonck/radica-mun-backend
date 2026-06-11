@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = ""
 
+    # Clave Fernet para cifrar credenciales de buzón de correo.
+    # Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ENCRYPTION_KEY: str = ""
+
     class Config:
         env_file = ".env"
 

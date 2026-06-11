@@ -100,24 +100,6 @@ class CanalOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── TipoRequerimiento ─────────────────────────────────────────────────────
-class TipoRequerimientoCreate(BaseModel):
-    nombre: str = Field(..., min_length=2, max_length=100)
-    descripcion: Optional[str] = None
-
-class TipoRequerimientoUpdate(BaseModel):
-    nombre: Optional[str] = Field(None, min_length=2)
-    descripcion: Optional[str] = None
-    activo: Optional[bool] = None
-
-class TipoRequerimientoOut(BaseModel):
-    id: int
-    nombre: str
-    descripcion: Optional[str]
-    activo: bool
-    model_config = {"from_attributes": True}
-
-
 # ── PlazoRespuesta ────────────────────────────────────────────────────────
 class PlazoRespuestaCreate(BaseModel):
     nombre: str = Field(..., min_length=2, max_length=100)
@@ -133,6 +115,28 @@ class PlazoRespuestaOut(BaseModel):
     nombre: str
     dias_habiles: int
     activo: bool
+    model_config = {"from_attributes": True}
+
+
+# ── TipoRequerimiento ─────────────────────────────────────────────────────
+class TipoRequerimientoCreate(BaseModel):
+    nombre: str = Field(..., min_length=2, max_length=100)
+    descripcion: Optional[str] = None
+    plazo_respuesta_id: Optional[int] = None
+
+class TipoRequerimientoUpdate(BaseModel):
+    nombre: Optional[str] = Field(None, min_length=2)
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+    plazo_respuesta_id: Optional[int] = None
+
+class TipoRequerimientoOut(BaseModel):
+    id: int
+    nombre: str
+    descripcion: Optional[str]
+    activo: bool
+    plazo_respuesta_id: Optional[int]
+    plazo_respuesta: Optional[PlazoRespuestaOut]
     model_config = {"from_attributes": True}
 
 
@@ -162,8 +166,8 @@ class BitacoraOut(BaseModel):
     id: int
     usuario_nombre: str
     accion: str
-    entidad: str
-    entidad_id: Optional[int]
+    modulo: str
+    modulo_id: Optional[int]
     detalle: Optional[str]
     created_at: datetime
     model_config = {"from_attributes": True}
@@ -179,3 +183,40 @@ class RespaldoOut(BaseModel):
     tipos_requerimiento: List[dict]
     plazos_respuesta: List[dict]
     total_usuarios: int
+
+
+# ── BuzonCorreo ───────────────────────────────────────────────────────────
+class BuzonCorreoCreate(BaseModel):
+    canal_id: int
+    proveedor: str = Field(..., pattern="^(gmail|outlook)$")
+    correo: EmailStr
+    password_app: str = Field(..., min_length=8, max_length=100)
+    intervalo_minutos: int = Field(default=5, ge=1, le=60)
+    max_adjuntos: int = Field(default=5, ge=1, le=20)
+    max_tamano_adjunto_mb: int = Field(default=10, ge=1, le=50)
+
+class BuzonCorreoUpdate(BaseModel):
+    password_app: Optional[str] = Field(None, min_length=8, max_length=100)
+    intervalo_minutos: Optional[int] = Field(None, ge=1, le=60)
+    max_adjuntos: Optional[int] = Field(None, ge=1, le=20)
+    max_tamano_adjunto_mb: Optional[int] = Field(None, ge=1, le=50)
+
+class BuzonCorreoOut(BaseModel):
+    id: int
+    canal_id: int
+    proveedor: str
+    correo: str
+    servidor_imap: str
+    puerto: int
+    intervalo_minutos: int
+    max_adjuntos: int
+    max_tamano_adjunto_mb: int
+    activo: bool
+    ultimo_polling: Optional[datetime]
+    estado_conexion: str
+    ultimo_error: Optional[str]
+    model_config = {"from_attributes": True}
+
+class TestConexionResult(BaseModel):
+    ok: bool
+    mensaje: str

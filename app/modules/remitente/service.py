@@ -75,14 +75,28 @@ def crear_remitente(
     usuario_id: Optional[int] = None,
     ip: Optional[str] = None,
 ) -> Remitente:
+    if data.numero_identificacion:
+        existente = (
+            db.query(Remitente)
+            .filter(
+                Remitente.numero_identificacion == data.numero_identificacion,
+                Remitente.activo == True,  # noqa: E712
+            )
+            .first()
+        )
+        if existente:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe un remitente activo con identificación {data.numero_identificacion}",
+            )
     remitente = Remitente(**data.model_dump())
     db.add(remitente)
     db.flush()
     registrar_evento(
         db,
         accion="crear_remitente",
-        entidad="remitentes",
-        entidad_id=remitente.id,
+        modulo="remitentes",
+        modulo_id=remitente.id,
         descripcion=f"Remitente creado: {remitente.nombre_completo}",
         usuario_id=usuario_id,
         ip=ip,
@@ -105,8 +119,8 @@ def actualizar_remitente(
     registrar_evento(
         db,
         accion="editar_remitente",
-        entidad="remitentes",
-        entidad_id=remitente_id,
+        modulo="remitentes",
+        modulo_id=remitente_id,
         descripcion=f"Remitente editado: {remitente.nombre_completo}",
         usuario_id=usuario_id,
         ip=ip,
@@ -149,9 +163,9 @@ def crear_o_actualizar_metadatos(
         registrar_evento(
             db,
             accion="editar_metadatos",
-            entidad="metadatos_recepcion",
-            entidad_id=existente.id,
-            descripcion=f"Metadatos actualizados para recepción {recepcion_id}",
+            modulo="recepciones",
+            modulo_id=recepcion_id,
+            descripcion="Remitente y metadatos actualizados",
             usuario_id=usuario_id,
             ip=ip,
         )
@@ -164,10 +178,10 @@ def crear_o_actualizar_metadatos(
     db.flush()
     registrar_evento(
         db,
-        accion="crear_metadatos",
-        entidad="metadatos_recepcion",
-        entidad_id=metadatos.id,
-        descripcion=f"Metadatos creados para recepción {recepcion_id}",
+        accion="registrar_metadatos",
+        modulo="recepciones",
+        modulo_id=recepcion_id,
+        descripcion=f"Remitente y metadatos registrados — asunto: {data.asunto}",
         usuario_id=usuario_id,
         ip=ip,
     )
@@ -191,8 +205,8 @@ def actualizar_metadatos(
     registrar_evento(
         db,
         accion="editar_metadatos",
-        entidad="metadatos_recepcion",
-        entidad_id=metadatos_id,
+        modulo="metadatos_recepcion",
+        modulo_id=metadatos_id,
         descripcion=f"Metadatos {metadatos_id} actualizados",
         usuario_id=usuario_id,
         ip=ip,

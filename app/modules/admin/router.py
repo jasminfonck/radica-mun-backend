@@ -13,6 +13,7 @@ from app.modules.admin.schemas import (
     PlazoRespuestaCreate, PlazoRespuestaUpdate, PlazoRespuestaOut,
     ConfiguracionUpdate, ConfiguracionOut,
     BitacoraOut, RespaldoOut,
+    BuzonCorreoCreate, BuzonCorreoUpdate, BuzonCorreoOut, TestConexionResult,
 )
 
 router = APIRouter(prefix="/admin", tags=["Administración"])
@@ -208,3 +209,46 @@ def generar_respaldo(
     current_user=Depends(require_rol("administrador")),
 ):
     return service.generar_respaldo(db)
+
+
+# ── Buzón de correo oficial ───────────────────────────────────────────────
+@router.get("/buzon-correo", response_model=BuzonCorreoOut | None)
+def obtener_buzon(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_rol("administrador")),
+):
+    return service.obtener_buzon(db)
+
+@router.post("/buzon-correo", response_model=BuzonCorreoOut)
+def crear_buzon(
+    data: BuzonCorreoCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_rol("administrador")),
+):
+    return service.crear_buzon_correo(db, data, current_user.id, current_user.nombre)
+
+@router.put("/buzon-correo/{buzon_id}", response_model=BuzonCorreoOut)
+def actualizar_buzon(
+    buzon_id: int,
+    data: BuzonCorreoUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_rol("administrador")),
+):
+    return service.actualizar_buzon_correo(db, buzon_id, data, current_user.id, current_user.nombre)
+
+@router.post("/buzon-correo/{buzon_id}/probar", response_model=TestConexionResult)
+def probar_buzon(
+    buzon_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_rol("administrador")),
+):
+    return service.probar_conexion_buzon(db, buzon_id)
+
+@router.post("/buzon-correo/{buzon_id}/activar", response_model=BuzonCorreoOut)
+def activar_buzon(
+    buzon_id: int,
+    activo: bool,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_rol("administrador")),
+):
+    return service.activar_buzon(db, buzon_id, activo, current_user.id, current_user.nombre)

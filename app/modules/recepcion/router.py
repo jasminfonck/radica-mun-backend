@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Request, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -9,6 +10,8 @@ from app.modules.recepcion.schemas import (
     RecepcionCreate, RecepcionUpdate, RecepcionOut, AdjuntoOut,
     FormularioPublicoCreate, FormularioPublicoOut, InfoPublicaOut,
 )
+from app.modules.consulta.models import BitacoraOperativa
+from app.modules.consulta.schemas import LogAuditoriaOut
 
 router = APIRouter(prefix="/recepcion", tags=["Recepción"])
 
@@ -29,6 +32,20 @@ def listar(
 @router.get("/publica/info", response_model=InfoPublicaOut)
 def info_publica(db: Session = Depends(get_db)):
     return service.get_info_publica(db)
+
+
+@router.get("/{recepcion_id}/bitacora", response_model=List[LogAuditoriaOut])
+def bitacora_recepcion(
+    recepcion_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    return (
+        db.query(BitacoraOperativa)
+        .filter(BitacoraOperativa.modulo == "recepciones", BitacoraOperativa.modulo_id == recepcion_id)
+        .order_by(LogAuditoria.created_at.desc())
+        .all()
+    )
 
 
 @router.get("/{recepcion_id}", response_model=RecepcionOut)
@@ -98,21 +115,35 @@ def actualizar(
     return service.actualizar_recepcion(db, recepcion_id, data, current_user.id, ip)
 
 
+@router.get("/{recepcion_id}/adjuntos/{adjunto_id}")
+def descargar_adjunto(
+    recepcion_id: int,
+    adjunto_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    return service.descargar_adjunto(db, adjunto_id)
+
+
 @router.post("/{recepcion_id}/adjuntos", response_model=AdjuntoOut)
 async def subir_adjunto(
     recepcion_id: int,
     archivo: UploadFile = File(...),
+    fase_creacion: bool = Query(False, description="Solo True durante la creación inicial"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    return await service.guardar_adjunto(db, recepcion_id, archivo)
+    return await service.guardar_adjunto(db, recepcion_id, archivo, fase_creacion)
 
 
-@router.delete("/{recepcion_id}/adjuntos/{adjunto_id}", status_code=204)
+@router.delete("/{recepcion_id}/adjuntos/{adjunto_id}", status_code=405)
 def eliminar_adjunto(
     recepcion_id: int,
     adjunto_id: int,
-    db: Session = Depends(get_db),
-    _=Depends(require_rol("administrador", "operador")),
 ):
-    service.eliminar_adjunto(db, adjunto_id)
+    from fastapi import HTTPException
+    raise HTTPException(
+        status_code=405,
+        detail="La eliminación de adjuntos no está permitida. "
+               "Los documentos son parte del registro oficial de la recepción.",
+    )

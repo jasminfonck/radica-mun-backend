@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db.base import Base
 
 
@@ -21,9 +21,9 @@ class Radicado(Base):
     # Ruta al PDF de la constancia generada
     ruta_constancia = Column(String(500))
 
-    fecha_radicacion = Column(DateTime, default=datetime.utcnow, nullable=False)
-    created_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    fecha_radicacion = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at       = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at       = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)
 
     recepcion   = relationship("Recepcion")
     dependencia = relationship("Dependencia")

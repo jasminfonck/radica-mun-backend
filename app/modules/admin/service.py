@@ -1,38 +1,45 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.core.security import hash_password
+from app.core.crypto import encrypt, decrypt
 from app.shared.exceptions import not_found, conflict, bad_request
 from app.modules.admin.models import (
     Usuario, Rol, Entidad, Dependencia, Canal,
     TipoRequerimiento, PlazoRespuesta, ConfiguracionSistema,
-    BitacoraAuditoria,
+    BitacoraAuditoria, BuzonCorreo,
 )
 from app.modules.admin.schemas import (
     UsuarioCreate, UsuarioUpdate, EntidadUpdate, DependenciaCreate,
     DependenciaUpdate, CanalUpdate, TipoRequerimientoCreate,
     TipoRequerimientoUpdate, PlazoRespuestaCreate, PlazoRespuestaUpdate,
-    ConfiguracionUpdate,
+    ConfiguracionUpdate, BuzonCorreoCreate, BuzonCorreoUpdate,
 )
+
+_SERVIDORES_IMAP = {
+    "gmail": "imap.gmail.com",
+    "outlook": "imap-mail.outlook.com",
+}
 
 
 # ── Bitácora de auditoría ─────────────────────────────────────────────────
 def registrar_auditoria(
     db: Session,
     accion: str,
-    entidad: str,
+    modulo: str,
     usuario_id: int,
     usuario_nombre: str,
-    entidad_id: int = None,
+    modulo_id: int = None,
     detalle: dict = None,
 ):
-    """Registra un evento crítico en la bitácora. RN-10 / V-14."""
+    """Registra un evento crítico en la bitácora admin. RN-10 / V-14."""
     registro = BitacoraAuditoria(
         usuario_id=usuario_id,
         usuario_nombre=usuario_nombre,
         accion=accion,
-        entidad=entidad,
-        entidad_id=entidad_id,
+        modulo=modulo,
+        modulo_id=modulo_id,
         detalle=json.dumps(detalle, ensure_ascii=False, default=str) if detalle else None,
     )
     db.add(registro)
@@ -72,9 +79,9 @@ def crear_usuario(db: Session, data: UsuarioCreate, actor_id: int, actor_nombre:
     db.add(usuario)
     db.flush()  # obtener el id antes del commit
     registrar_auditoria(
-        db, accion="crear_usuario", entidad="Usuario",
+        db, accion="crear_usuario", modulo="Usuario",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=usuario.id,
+        modulo_id=usuario.id,
         detalle={"email": data.email, "rol_id": data.rol_id},
     )
     db.commit()
@@ -109,9 +116,9 @@ def actualizar_usuario(db: Session, usuario_id: int, data: UsuarioUpdate, actor_
         setattr(usuario, campo, valor)
 
     registrar_auditoria(
-        db, accion="actualizar_usuario", entidad="Usuario",
+        db, accion="actualizar_usuario", modulo="Usuario",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=usuario_id,
+        modulo_id=usuario_id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -136,9 +143,9 @@ def actualizar_entidad(db: Session, data: EntidadUpdate, actor_id: int, actor_no
         setattr(entidad, campo, valor)
     entidad.configurada = True
     registrar_auditoria(
-        db, accion="actualizar_entidad", entidad="Entidad",
+        db, accion="actualizar_entidad", modulo="Entidad",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=entidad.id,
+        modulo_id=entidad.id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -156,13 +163,15 @@ def listar_dependencias(db: Session, solo_activas: bool = False):
 def crear_dependencia(db: Session, data: DependenciaCreate, actor_id: int, actor_nombre: str):
     if db.query(Dependencia).filter(Dependencia.nombre == data.nombre).first():
         conflict("Ya existe una dependencia con ese nombre")
+    if data.codigo and db.query(Dependencia).filter(Dependencia.codigo == data.codigo).first():
+        conflict("Ya existe una dependencia con ese código")
     dep = Dependencia(**data.model_dump())
     db.add(dep)
     db.flush()
     registrar_auditoria(
-        db, accion="crear_dependencia", entidad="Dependencia",
+        db, accion="crear_dependencia", modulo="Dependencia",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=dep.id,
+        modulo_id=dep.id,
         detalle={"nombre": data.nombre},
     )
     db.commit()
@@ -173,13 +182,16 @@ def actualizar_dependencia(db: Session, dep_id: int, data: DependenciaUpdate, ac
     dep = db.query(Dependencia).filter(Dependencia.id == dep_id).first()
     if not dep:
         not_found("Dependencia")
+    if data.codigo and data.codigo != dep.codigo:
+        if db.query(Dependencia).filter(Dependencia.codigo == data.codigo, Dependencia.id != dep_id).first():
+            conflict("Ya existe una dependencia con ese código")
     anterior = {"activa": dep.activa, "nombre": dep.nombre}
     for campo, valor in data.model_dump(exclude_none=True).items():
         setattr(dep, campo, valor)
     registrar_auditoria(
-        db, accion="actualizar_dependencia", entidad="Dependencia",
+        db, accion="actualizar_dependencia", modulo="Dependencia",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=dep_id,
+        modulo_id=dep_id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -226,9 +238,9 @@ def actualizar_canal(db: Session, canal_id: int, data: CanalUpdate, actor_id: in
         canal.acuse_configurado = data.acuse_configurado
 
     registrar_auditoria(
-        db, accion="actualizar_canal", entidad="Canal",
+        db, accion="actualizar_canal", modulo="Canal",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=canal_id,
+        modulo_id=canal_id,
         detalle={"anterior": anterior, "nuevo": {"activo": data.activo}},
     )
     db.commit()
@@ -245,9 +257,9 @@ def crear_tipo_requerimiento(db: Session, data: TipoRequerimientoCreate, actor_i
     db.add(tipo)
     db.flush()
     registrar_auditoria(
-        db, accion="crear_tipo_requerimiento", entidad="TipoRequerimiento",
+        db, accion="crear_tipo_requerimiento", modulo="TipoRequerimiento",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=tipo.id,
+        modulo_id=tipo.id,
         detalle={"nombre": data.nombre},
     )
     db.commit()
@@ -262,9 +274,9 @@ def actualizar_tipo_requerimiento(db: Session, tipo_id: int, data: TipoRequerimi
     for campo, valor in data.model_dump(exclude_none=True).items():
         setattr(tipo, campo, valor)
     registrar_auditoria(
-        db, accion="actualizar_tipo_requerimiento", entidad="TipoRequerimiento",
+        db, accion="actualizar_tipo_requerimiento", modulo="TipoRequerimiento",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=tipo_id,
+        modulo_id=tipo_id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -281,9 +293,9 @@ def crear_plazo(db: Session, data: PlazoRespuestaCreate, actor_id: int, actor_no
     db.add(plazo)
     db.flush()
     registrar_auditoria(
-        db, accion="crear_plazo_respuesta", entidad="PlazoRespuesta",
+        db, accion="crear_plazo_respuesta", modulo="PlazoRespuesta",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=plazo.id,
+        modulo_id=plazo.id,
         detalle={"nombre": data.nombre, "dias_habiles": data.dias_habiles},
     )
     db.commit()
@@ -298,9 +310,9 @@ def actualizar_plazo(db: Session, plazo_id: int, data: PlazoRespuestaUpdate, act
     for campo, valor in data.model_dump(exclude_none=True).items():
         setattr(plazo, campo, valor)
     registrar_auditoria(
-        db, accion="actualizar_plazo_respuesta", entidad="PlazoRespuesta",
+        db, accion="actualizar_plazo_respuesta", modulo="PlazoRespuesta",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=plazo_id,
+        modulo_id=plazo_id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -327,9 +339,9 @@ def actualizar_configuracion(db: Session, data: ConfiguracionUpdate, actor_id: i
     for campo, valor in data.model_dump(exclude_none=True).items():
         setattr(config, campo, valor)
     registrar_auditoria(
-        db, accion="actualizar_configuracion", entidad="ConfiguracionSistema",
+        db, accion="actualizar_configuracion", modulo="ConfiguracionSistema",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
-        entidad_id=config.id,
+        modulo_id=config.id,
         detalle={"anterior": anterior, "nuevo": data.model_dump(exclude_none=True)},
     )
     db.commit()
@@ -362,6 +374,114 @@ def verificar_sistema_listo(db: Session) -> bool:
     return listo
 
 
+# ── BuzonCorreo ───────────────────────────────────────────────────────────
+def obtener_buzon(db: Session) -> Optional[BuzonCorreo]:
+    return db.query(BuzonCorreo).first()
+
+def crear_buzon_correo(db: Session, data: BuzonCorreoCreate, actor_id: int, actor_nombre: str) -> BuzonCorreo:
+    if db.query(BuzonCorreo).filter(BuzonCorreo.canal_id == data.canal_id).first():
+        conflict("Ya existe un buzón configurado para ese canal")
+
+    canal = db.query(Canal).filter(Canal.id == data.canal_id, Canal.tipo == "email").first()
+    if not canal:
+        not_found("Canal de tipo email")
+
+    servidor = _SERVIDORES_IMAP.get(data.proveedor)
+    if not servidor:
+        bad_request("Proveedor no soportado. Use 'gmail' o 'outlook'")
+
+    buzon = BuzonCorreo(
+        canal_id=data.canal_id,
+        proveedor=data.proveedor,
+        correo=str(data.correo),
+        password_app_enc=encrypt(data.password_app),
+        servidor_imap=servidor,
+        puerto=993,
+        intervalo_minutos=data.intervalo_minutos,
+        max_adjuntos=data.max_adjuntos,
+        max_tamano_adjunto_mb=data.max_tamano_adjunto_mb,
+    )
+    db.add(buzon)
+    db.flush()
+    registrar_auditoria(
+        db, accion="crear_buzon_correo", modulo="BuzonCorreo",
+        usuario_id=actor_id, usuario_nombre=actor_nombre,
+        modulo_id=buzon.id,
+        detalle={"correo": str(data.correo), "proveedor": data.proveedor},
+    )
+    db.commit()
+    db.refresh(buzon)
+    return buzon
+
+def actualizar_buzon_correo(db: Session, buzon_id: int, data: BuzonCorreoUpdate, actor_id: int, actor_nombre: str) -> BuzonCorreo:
+    buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
+    if not buzon:
+        not_found("Buzón de correo")
+
+    if data.password_app:
+        buzon.password_app_enc = encrypt(data.password_app)
+        buzon.estado_conexion = "sin_probar"
+    if data.intervalo_minutos is not None:
+        buzon.intervalo_minutos = data.intervalo_minutos
+    if data.max_adjuntos is not None:
+        buzon.max_adjuntos = data.max_adjuntos
+    if data.max_tamano_adjunto_mb is not None:
+        buzon.max_tamano_adjunto_mb = data.max_tamano_adjunto_mb
+
+    registrar_auditoria(
+        db, accion="actualizar_buzon_correo", modulo="BuzonCorreo",
+        usuario_id=actor_id, usuario_nombre=actor_nombre,
+        modulo_id=buzon_id,
+        detalle={"actualizado": data.model_dump(exclude_none=True, exclude={"password_app"})},
+    )
+    db.commit()
+    db.refresh(buzon)
+    return buzon
+
+def activar_buzon(db: Session, buzon_id: int, activo: bool, actor_id: int, actor_nombre: str) -> BuzonCorreo:
+    buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
+    if not buzon:
+        not_found("Buzón de correo")
+
+    if activo and buzon.estado_conexion == "sin_probar":
+        bad_request("Debe probar la conexión antes de activar el buzón")
+    if activo and buzon.estado_conexion == "error":
+        bad_request("No se puede activar el buzón con error de conexión. Pruebe la conexión primero.")
+
+    buzon.activo = activo
+    registrar_auditoria(
+        db,
+        accion="activar_buzon_correo" if activo else "desactivar_buzon_correo",
+        modulo="BuzonCorreo",
+        usuario_id=actor_id, usuario_nombre=actor_nombre,
+        modulo_id=buzon_id,
+        detalle={"activo": activo},
+    )
+    db.commit()
+    db.refresh(buzon)
+    return buzon
+
+def probar_conexion_buzon(db: Session, buzon_id: int) -> dict:
+    from app.modules.recepcion.email_poller import probar_conexion_imap
+
+    buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
+    if not buzon:
+        not_found("Buzón de correo")
+
+    try:
+        password = decrypt(buzon.password_app_enc)
+        probar_conexion_imap(buzon.servidor_imap, buzon.puerto, buzon.correo, password)
+        buzon.estado_conexion = "ok"
+        buzon.ultimo_error = None
+        db.commit()
+        return {"ok": True, "mensaje": "Conexión exitosa al buzón IMAP"}
+    except Exception as e:
+        buzon.estado_conexion = "error"
+        buzon.ultimo_error = str(e)[:500]
+        db.commit()
+        return {"ok": False, "mensaje": str(e)}
+
+
 # ── Respaldo ──────────────────────────────────────────────────────────────
 def generar_respaldo(db: Session) -> dict:
     """Genera una exportación básica de la configuración del sistema. RN-13 / V-16."""
@@ -377,7 +497,7 @@ def generar_respaldo(db: Session) -> dict:
         return {c: getattr(obj, c, None) for c in campos}
 
     return {
-        "generado_en": datetime.utcnow(),
+        "generado_en": datetime.now(timezone.utc),
         "entidad": _row(entidad, ["nombre", "nit", "municipio", "departamento", "direccion", "telefono", "email_institucional"]) if entidad else None,
         "configuracion": _row(config, ["prefijo_radicado", "anio_radicado", "secuencia_actual", "ruta_almacenamiento", "color_primario", "politica_privacidad_activa"]) if config else None,
         "dependencias": [_row(d, ["nombre", "codigo", "responsable", "email", "activa"]) for d in dependencias],

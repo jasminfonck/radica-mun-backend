@@ -10,18 +10,25 @@ router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
 @router.post("/login", response_model=TokenResponse)
 def login(data: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(Usuario).filter(
-        Usuario.email == data.email,
-        Usuario.activo == True
-    ).first()
+    user = db.query(Usuario).filter(Usuario.email == data.email).first()
 
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Correo o contraseña incorrectos"
+            detail="Correo o contraseña incorrectos",
         )
 
-    token = create_access_token({"sub": str(user.id)})
+    if not user.activo:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario inactivo. Contacte al administrador del sistema.",
+        )
+
+    # Invalidar cualquier sesión previa incrementando la versión
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
+
+    token = create_access_token({"sub": str(user.id), "ver": user.token_version})
 
     return TokenResponse(
         access_token=token,

@@ -39,6 +39,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     if user is None:
         raise credentials_exception
+
+    # Validar que la versión del token coincide con la BD
+    token_ver = payload.get("ver")
+    if token_ver is not None and token_ver != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="sesion_desplazada",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
 
 

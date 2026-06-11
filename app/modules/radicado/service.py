@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -20,7 +20,7 @@ def _siguiente_numero(db: Session) -> str:
     if not config:
         raise HTTPException(status_code=500, detail="Sistema no configurado")
 
-    anio_actual = datetime.utcnow().year
+    anio_actual = datetime.now(timezone.utc).year
     # Si cambió el año, reiniciar secuencia
     if config.anio_radicado != anio_actual:
         config.anio_radicado = anio_actual
@@ -98,6 +98,16 @@ def crear_radicado(
             detail="Debe registrar el remitente y los metadatos antes de radicar"
         )
 
+    if recepcion.estado != "competente":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Solo se puede radicar una recepción en estado 'competente'. "
+                f"Estado actual: '{recepcion.estado}'. "
+                "Cambie el estado a 'Competente' en la pestaña de Información antes de radicar."
+            ),
+        )
+
     # Generar número
     numero = _siguiente_numero(db)
 
@@ -122,9 +132,17 @@ def crear_radicado(
     registrar_evento(
         db,
         accion="crear_radicado",
-        entidad="radicado",
-        entidad_id=radicado.id,
+        modulo="radicado",
+        modulo_id=radicado.id,
         descripcion=f"Radicado {numero} generado para recepción #{data.recepcion_id}",
+        usuario_id=usuario_id,
+    )
+    registrar_evento(
+        db,
+        accion="generar_radicado",
+        modulo="recepciones",
+        modulo_id=data.recepcion_id,
+        descripcion=f"Número de radicado asignado: {numero}",
         usuario_id=usuario_id,
     )
     db.commit()
@@ -143,8 +161,8 @@ def anular_radicado(
     registrar_evento(
         db,
         accion="anular_radicado",
-        entidad="radicado",
-        entidad_id=radicado_id,
+        modulo="radicado",
+        modulo_id=radicado_id,
         descripcion=f"Radicado {radicado.numero_radicado} anulado. Motivo: {data.observaciones}",
     )
     db.commit()
