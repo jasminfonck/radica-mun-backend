@@ -11,11 +11,12 @@ class Radicado(Base):
     numero_radicado = Column(String(30), unique=True, nullable=False, index=True)
 
     recepcion_id    = Column(Integer, ForeignKey("recepciones.id"), unique=True, nullable=False)
-    dependencia_id  = Column(Integer, ForeignKey("dependencias.id"), nullable=False)
-    radicado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    dependencia_id  = Column(Integer, ForeignKey("dependencias.id"), nullable=True)
+    radicado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
 
-    # Estado: vigente | anulado
-    estado        = Column(String(20), default="vigente", nullable=False)
+    # Estado: pendiente | radicado | anulado
+    # 'pendiente' → número asignado al recibir, sin completar; 'radicado' → oficial con PDF
+    estado        = Column(String(20), default="pendiente", nullable=False)
     observaciones = Column(Text)
 
     # Ruta al PDF de la constancia generada

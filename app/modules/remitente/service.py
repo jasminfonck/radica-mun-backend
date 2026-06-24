@@ -1,3 +1,4 @@
+import json as _json
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from fastapi import HTTPException, status
@@ -158,8 +159,16 @@ def crear_o_actualizar_metadatos(
     existente = obtener_metadatos(db, recepcion_id)
 
     if existente:
+        # No sobreescribir campos que el sistema llenó automáticamente
+        locked: set = set()
+        if existente.campos_bloqueados:
+            try:
+                locked = set(_json.loads(existente.campos_bloqueados))
+            except Exception:
+                pass
         for campo, valor in data.model_dump(exclude_unset=True).items():
-            setattr(existente, campo, valor)
+            if campo not in locked:
+                setattr(existente, campo, valor)
         registrar_evento(
             db,
             accion="editar_metadatos",

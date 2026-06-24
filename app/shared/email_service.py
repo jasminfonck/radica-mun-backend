@@ -121,8 +121,168 @@ def enviar_acuse_recepcion(
             server.starttls(context=context)
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.sendmail(remitente, destinatario, msg.as_string())
-        logger.info("Acuse enviado a %s (%s)", destinatario, codigo)
+        logger.info("Acuse enviado a %s", destinatario)
         return True
     except Exception as exc:
         logger.warning("No se pudo enviar acuse a %s: %s", destinatario, exc)
+        return False
+
+
+def enviar_aviso_adjuntos(
+    destinatario: str,
+    asunto_recepcion: str,
+    entidad_nombre: str,
+    avisos: list[str],
+    max_adjuntos: int,
+    max_mb: int,
+    tipos_legibles: list[str],
+) -> bool:
+    if not settings.SMTP_HOST or not settings.SMTP_USER:
+        logger.info("SMTP no configurado — aviso de adjuntos no enviado")
+        return False
+
+    remitente = settings.SMTP_FROM or settings.SMTP_USER
+
+    avisos_html = "".join(
+        f'<li style="margin-bottom:6px;color:#555;font-size:14px">{a}</li>'
+        for a in avisos
+    )
+    tipos_html = ", ".join(tipos_legibles) if tipos_legibles else "todos los formatos"
+    limite_html = (
+        f"<strong>{max_adjuntos}</strong> archivo{'s' if max_adjuntos != 1 else ''} "
+        f"de máximo <strong>{max_mb} MB</strong> cada uno."
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Su comunicación fue recibida — información sobre archivos adjuntos"
+    msg["From"] = remitente
+    msg["To"] = destinatario
+
+    html = f"""
+    <html>
+    <body style="margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;background:#f5f5f5">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td align="center" style="padding:32px 16px">
+            <table width="600" cellpadding="0" cellspacing="0"
+                   style="background:#fff;border-radius:8px;overflow:hidden;
+                          box-shadow:0 2px 8px rgba(0,0,0,.08)">
+
+              <tr>
+                <td style="background:#1a237e;padding:28px 32px">
+                  <p style="margin:0;color:#fff;font-size:20px;font-weight:bold">{entidad_nombre}</p>
+                  <p style="margin:4px 0 0;color:rgba(255,255,255,.75);font-size:13px">
+                    Sistema de radicación de comunicaciones
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td align="center" style="padding:28px 32px 0">
+                  <div style="width:64px;height:64px;border-radius:50%;
+                              background:#fff8e1;display:inline-block;
+                              line-height:64px;text-align:center;font-size:34px">
+                    ⚠️
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:20px 32px 8px">
+                  <h2 style="margin:0 0 8px;color:#1a237e;font-size:18px;text-align:center">
+                    Su comunicación fue recibida
+                  </h2>
+                  <p style="margin:0 0 16px;font-size:14px;color:#555;text-align:center">
+                    Sin embargo, uno o más archivos adjuntos no pudieron procesarse
+                    por no cumplir con las restricciones del sistema.
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:0 32px 16px">
+                  <table width="100%" cellpadding="0" cellspacing="0"
+                         style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden">
+                    <tr>
+                      <td style="padding:10px 16px;background:#f5f7ff;font-size:13px;
+                                 font-weight:bold;color:#333;width:160px">
+                        Asunto recibido
+                      </td>
+                      <td style="padding:10px 16px;font-size:13px;color:#555">
+                        {asunto_recepcion}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:0 32px 16px">
+                  <div style="background:#fff3e0;border:1px solid #ffcc02;border-radius:6px;
+                              padding:16px 20px">
+                    <p style="margin:0 0 10px;font-size:14px;font-weight:bold;color:#e65100">
+                      Archivos con problema:
+                    </p>
+                    <ul style="margin:0;padding-left:20px">
+                      {avisos_html}
+                    </ul>
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:0 32px 24px">
+                  <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;
+                              padding:16px 20px">
+                    <p style="margin:0 0 8px;font-size:14px;font-weight:bold;color:#2e7d32">
+                      Restricciones vigentes del sistema:
+                    </p>
+                    <p style="margin:0 0 4px;font-size:14px;color:#555">
+                      · Máximo {limite_html}
+                    </p>
+                    <p style="margin:0;font-size:14px;color:#555">
+                      · Formatos aceptados: {tipos_html}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="padding:0 32px 28px">
+                  <p style="margin:0;font-size:14px;color:#555;line-height:1.7">
+                    Por favor reenvíe su comunicación teniendo en cuenta las restricciones
+                    indicadas. Si tiene dudas, comuníquese directamente con la entidad.
+                  </p>
+                </td>
+              </tr>
+
+              <tr>
+                <td style="background:#f5f5f5;padding:14px 32px;
+                           font-size:11px;color:#999;border-top:1px solid #e0e0e0">
+                  Este correo fue generado automáticamente por el sistema de radicación
+                  de {entidad_nombre}. Por favor no responda a este mensaje.
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(remitente, destinatario, msg.as_string())
+        logger.info("Aviso de adjuntos enviado a %s", destinatario)
+        return True
+    except Exception as exc:
+        logger.warning("No se pudo enviar aviso de adjuntos a %s: %s", destinatario, exc)
         return False

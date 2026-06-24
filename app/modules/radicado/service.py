@@ -32,6 +32,31 @@ def _siguiente_numero(db: Session) -> str:
     return f"{config.prefijo_radicado}-{anio_actual}-{config.secuencia_actual:05d}"
 
 
+def _asignar_radicado_inicial(db: Session, recepcion_id: int) -> Radicado:
+    """Crea el stub de radicado en el momento de la recepción (estado='pendiente').
+
+    El número queda asignado desde el inicio como referencia de seguimiento.
+    La dependencia y el operador se completan cuando el operador finaliza el trámite.
+    """
+    numero = _siguiente_numero(db)
+    radicado = Radicado(
+        numero_radicado=numero,
+        recepcion_id=recepcion_id,
+        dependencia_id=None,
+        radicado_por_id=None,
+        estado="pendiente",
+    )
+    db.add(radicado)
+    registrar_evento(
+        db,
+        accion="asignar_numero_radicado",
+        modulo="recepciones",
+        modulo_id=recepcion_id,
+        descripcion=f"Número de seguimiento asignado: {numero}",
+    )
+    return radicado
+
+
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 def listar_radicados(
@@ -72,21 +97,65 @@ def obtener_por_recepcion(db: Session, recepcion_id: int) -> Radicado | None:
     return db.query(Radicado).filter(Radicado.recepcion_id == recepcion_id).first()
 
 
+def consulta_publica(db: Session, numero: str) -> dict:
+    from app.modules.admin.models import Dependencia
+    from app.modules.remitente.models import MetadatosRecepcion
+    from app.modules.recepcion.models import Recepcion
+
+    r = db.query(Radicado).filter(Radicado.numero_radicado == numero).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Número de radicado no encontrado")
+
+    dep = db.get(Dependencia, r.dependencia_id) if r.dependencia_id else None
+    metadatos = (
+        db.query(MetadatosRecepcion)
+        .filter(MetadatosRecepcion.recepcion_id == r.recepcion_id)
+        .first()
+    )
+
+    asunto = None
+    tipo_req = None
+    remitente_nombre = None
+    if metadatos:
+        asunto = metadatos.asunto
+        if metadatos.tipo_requerimiento:
+            tipo_req = metadatos.tipo_requerimiento.nombre
+        if metadatos.remitente:
+            remitente_nombre = metadatos.remitente.nombre_completo
+    else:
+        # Para radicados pendientes sin metadatos aún, usar asunto provisional
+        recepcion = db.get(Recepcion, r.recepcion_id)
+        if recepcion:
+            asunto = recepcion.asunto_provisional
+
+    return {
+        "numero_radicado": r.numero_radicado,
+        "fecha_radicacion": r.fecha_radicacion,
+        "estado": r.estado,
+        "dependencia_nombre": dep.nombre if dep else "En proceso",
+        "asunto": asunto,
+        "tipo_requerimiento": tipo_req,
+        "remitente_nombre": remitente_nombre,
+        "tiene_constancia": bool(r.ruta_constancia and os.path.exists(r.ruta_constancia)),
+    }
+
+
 def crear_radicado(
     db: Session, data: RadicadoCreate, usuario_id: int
 ) -> Radicado:
-    # Verificar que la recepción existe y no tiene radicado
+    """Completa el stub de radicado: asigna dependencia, operador, genera PDF.
+
+    El número ya fue asignado al crear la recepción (_asignar_radicado_inicial).
+    Si por alguna razón no existe el stub (datos previos a la migración), lo crea.
+    """
     recepcion = db.get(Recepcion, data.recepcion_id)
     if not recepcion:
         raise HTTPException(status_code=404, detail="Recepción no encontrada")
 
-    if obtener_por_recepcion(db, data.recepcion_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Esta recepción ya fue radicada"
-        )
+    radicado = obtener_por_recepcion(db, data.recepcion_id)
+    if radicado and radicado.estado == "radicado":
+        raise HTTPException(status_code=400, detail="Esta recepción ya fue radicada")
 
-    # Verificar que tiene metadatos (remitente)
     metadatos = (
         db.query(MetadatosRecepcion)
         .filter(MetadatosRecepcion.recepcion_id == data.recepcion_id)
@@ -95,46 +164,56 @@ def crear_radicado(
     if not metadatos:
         raise HTTPException(
             status_code=400,
-            detail="Debe registrar el remitente y los metadatos antes de radicar"
+            detail="Debe registrar el remitente y los metadatos antes de completar el radicado"
         )
 
     if recepcion.estado != "competente":
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Solo se puede radicar una recepción en estado 'competente'. "
+                f"Solo se puede completar el radicado de una recepción en estado 'competente'. "
                 f"Estado actual: '{recepcion.estado}'. "
-                "Cambie el estado a 'Competente' en la pestaña de Información antes de radicar."
+                "Cambie el estado a 'Competente' en la pestaña de Información antes de continuar."
             ),
         )
 
-    # Generar número
-    numero = _siguiente_numero(db)
+    if radicado:
+        # Completar el stub existente
+        radicado.dependencia_id  = data.dependencia_id
+        radicado.radicado_por_id = usuario_id
+        radicado.observaciones   = data.observaciones
+        radicado.estado          = "radicado"
+        db.flush()
+        numero = radicado.numero_radicado
+    else:
+        # Compatibilidad con recepciones creadas antes de la migración
+        numero = _siguiente_numero(db)
+        radicado = Radicado(
+            numero_radicado=numero,
+            recepcion_id=data.recepcion_id,
+            dependencia_id=data.dependencia_id,
+            radicado_por_id=usuario_id,
+            observaciones=data.observaciones,
+            estado="radicado",
+        )
+        db.add(radicado)
+        db.flush()
 
-    radicado = Radicado(
-        numero_radicado=numero,
-        recepcion_id=data.recepcion_id,
-        dependencia_id=data.dependencia_id,
-        radicado_por_id=usuario_id,
-        observaciones=data.observaciones,
-    )
-    db.add(radicado)
-    db.flush()
+    recepcion.estado = "radicado"
 
     # Generar PDF
     try:
         ruta_pdf = _generar_pdf(db, radicado, metadatos)
         radicado.ruta_constancia = ruta_pdf
     except Exception:
-        # PDF falla silencioso — el radicado se crea igual
         pass
 
     registrar_evento(
         db,
-        accion="crear_radicado",
+        accion="completar_radicado",
         modulo="radicado",
         modulo_id=radicado.id,
-        descripcion=f"Radicado {numero} generado para recepción #{data.recepcion_id}",
+        descripcion=f"Radicado {numero} completado para recepción #{data.recepcion_id}",
         usuario_id=usuario_id,
     )
     registrar_evento(
@@ -142,7 +221,7 @@ def crear_radicado(
         accion="generar_radicado",
         modulo="recepciones",
         modulo_id=data.recepcion_id,
-        descripcion=f"Número de radicado asignado: {numero}",
+        descripcion=f"Radicado completado: {numero}",
         usuario_id=usuario_id,
     )
     db.commit()
@@ -156,6 +235,8 @@ def anular_radicado(
     radicado = obtener_radicado(db, radicado_id)
     if radicado.estado == "anulado":
         raise HTTPException(status_code=400, detail="El radicado ya está anulado")
+    if radicado.estado != "radicado":
+        raise HTTPException(status_code=400, detail=f"Estado inesperado: '{radicado.estado}'")
     radicado.estado = "anulado"
     radicado.observaciones = data.observaciones
     registrar_evento(

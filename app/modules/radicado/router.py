@@ -8,7 +8,7 @@ from app.core.dependencies import get_db, get_current_user, require_rol
 from app.modules.admin.models import Usuario
 from app.modules.radicado import service
 from app.modules.radicado.schemas import (
-    RadicadoCreate, RadicadoAnular, RadicadoOut, RadicadoResumen,
+    RadicadoCreate, RadicadoAnular, RadicadoOut, RadicadoResumen, RadicadoPublicoOut,
 )
 
 router = APIRouter(prefix="/radicado", tags=["Radicado"])
@@ -26,6 +26,24 @@ def listar(
     _=Depends(get_current_user),
 ):
     return service.listar_radicados(db, dependencia_id, estado, fecha_desde, fecha_hasta)
+
+
+@router.get("/publico/{numero}", response_model=RadicadoPublicoOut)
+def consulta_publica(numero: str, db: Session = Depends(get_db)):
+    return service.consulta_publica(db, numero)
+
+
+@router.get("/publico/{numero}/constancia")
+def descargar_constancia_publica(numero: str, db: Session = Depends(get_db)):
+    r = service.obtener_por_numero(db, numero)
+    if not r.ruta_constancia or not os.path.exists(r.ruta_constancia):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Constancia no disponible")
+    return FileResponse(
+        path=r.ruta_constancia,
+        media_type="application/pdf",
+        filename=f"constancia_{r.numero_radicado}.pdf",
+    )
 
 
 @router.get("/numero/{numero}", response_model=RadicadoOut)

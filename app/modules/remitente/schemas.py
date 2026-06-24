@@ -1,3 +1,4 @@
+import json as _json
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
@@ -136,5 +137,16 @@ class MetadatosOut(BaseModel):
     observaciones:      Optional[str]
     numero_referencia:  Optional[str]
     fecha_documento:    Optional[datetime]
+    campos_bloqueados:  Optional[List[str]] = None
     created_at: datetime
     model_config = {"from_attributes": True}
+
+    @field_validator("campos_bloqueados", mode="before")
+    @classmethod
+    def _parse_json(cls, v):
+        if isinstance(v, str):
+            try:
+                return _json.loads(v)
+            except Exception:
+                return None
+        return v

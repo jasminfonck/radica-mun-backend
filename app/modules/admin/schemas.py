@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing import Optional, Any, List
 from datetime import datetime
 
@@ -142,11 +142,14 @@ class TipoRequerimientoOut(BaseModel):
 
 # ── ConfiguracionSistema ──────────────────────────────────────────────────
 class ConfiguracionUpdate(BaseModel):
-    prefijo_radicado: Optional[str] = Field(None, max_length=10)
-    ruta_almacenamiento: Optional[str] = None
-    color_primario: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
-    politica_privacidad_activa: Optional[bool] = None
-    politica_privacidad_texto: Optional[str] = None
+    prefijo_radicado:            Optional[str]  = Field(None, max_length=10)
+    ruta_almacenamiento:         Optional[str]  = None
+    color_primario:              Optional[str]  = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    politica_privacidad_activa:  Optional[bool] = None
+    politica_privacidad_texto:   Optional[str]  = None
+    max_adjuntos:                Optional[int]  = Field(None, ge=1, le=20)
+    max_tamano_adjunto_mb:       Optional[int]  = Field(None, ge=1, le=100)
+    tipos_archivo_permitidos:    Optional[str]  = None
 
 class ConfiguracionOut(BaseModel):
     id: int
@@ -158,6 +161,9 @@ class ConfiguracionOut(BaseModel):
     sistema_listo: bool
     politica_privacidad_activa: bool
     politica_privacidad_texto: Optional[str]
+    max_adjuntos: int
+    max_tamano_adjunto_mb: int
+    tipos_archivo_permitidos: str
     model_config = {"from_attributes": True}
 
 
@@ -189,33 +195,65 @@ class RespaldoOut(BaseModel):
 class BuzonCorreoCreate(BaseModel):
     canal_id: int
     proveedor: str = Field(..., pattern="^(gmail|outlook)$")
+    tipo_cuenta: str = Field(..., pattern="^(personal|empresarial)$")
+    metodo_conexion: str = Field(default="imap", pattern="^(imap|graph)$")
     correo: EmailStr
-    password_app: str = Field(..., min_length=8, max_length=100)
+    oauth_client_id: str = Field(..., min_length=1, max_length=200)
+    oauth_client_secret: str = Field(..., min_length=1, max_length=500)
+    oauth_tenant_id: Optional[str] = Field(None, max_length=200)
     intervalo_minutos: int = Field(default=5, ge=1, le=60)
-    max_adjuntos: int = Field(default=5, ge=1, le=20)
-    max_tamano_adjunto_mb: int = Field(default=10, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def _validar(self) -> "BuzonCorreoCreate":
+        if self.proveedor == "outlook" and self.tipo_cuenta == "empresarial" and not self.oauth_tenant_id:
+            raise ValueError("oauth_tenant_id es requerido para cuentas Microsoft 365 empresariales")
+        if self.proveedor == "gmail" and self.metodo_conexion != "imap":
+            raise ValueError("Gmail solo soporta el método de conexión IMAP")
+        return self
+
 
 class BuzonCorreoUpdate(BaseModel):
-    password_app: Optional[str] = Field(None, min_length=8, max_length=100)
+    proveedor: Optional[str] = Field(None, pattern="^(gmail|outlook)$")
+    tipo_cuenta: Optional[str] = Field(None, pattern="^(personal|empresarial)$")
+    metodo_conexion: Optional[str] = Field(None, pattern="^(imap|graph)$")
+    correo: Optional[str] = Field(None, max_length=200)
+    oauth_client_id: Optional[str] = Field(None, max_length=200)
+    oauth_client_secret: Optional[str] = Field(None, max_length=500)
+    oauth_tenant_id: Optional[str] = Field(None, max_length=200)
     intervalo_minutos: Optional[int] = Field(None, ge=1, le=60)
-    max_adjuntos: Optional[int] = Field(None, ge=1, le=20)
-    max_tamano_adjunto_mb: Optional[int] = Field(None, ge=1, le=50)
+
 
 class BuzonCorreoOut(BaseModel):
     id: int
     canal_id: int
     proveedor: str
+    tipo_cuenta: str
+    metodo_conexion: str
+    auth_type: str
     correo: str
     servidor_imap: str
     puerto: int
     intervalo_minutos: int
-    max_adjuntos: int
-    max_tamano_adjunto_mb: int
     activo: bool
     ultimo_polling: Optional[datetime]
     estado_conexion: str
     ultimo_error: Optional[str]
+    oauth_autorizado: bool
+    oauth_token_expiry: Optional[datetime]
+    oauth_client_id: Optional[str] = None
+    oauth_tenant_id: Optional[str] = None
     model_config = {"from_attributes": True}
+
+
+class OAuthIniciarOut(BaseModel):
+    url: str
+    mensaje: str
+
+
+class OAuthCompletarIn(BaseModel):
+    code: str
+    state: str
+
 
 class TestConexionResult(BaseModel):
     ok: bool

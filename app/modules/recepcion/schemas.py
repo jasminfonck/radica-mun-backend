@@ -3,7 +3,18 @@ from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 
-ESTADOS_VALIDOS = ["recibido", "en_revision", "pendiente", "incompleto", "no_competente", "competente"]
+ESTADOS_VALIDOS = ["recibido", "pendiente", "incompleto", "no_competente", "competente", "radicado"]
+
+# Desde qué estados se puede pasar a cada estado destino (solo vía PUT /recepcion/{id}).
+# "radicado" es un estado terminal que solo fija el servicio de radicado internamente.
+TRANSICIONES_VALIDAS: dict[str, set[str]] = {
+    "recibido":      {"pendiente", "incompleto", "no_competente", "competente"},
+    "pendiente":     {"recibido", "incompleto", "no_competente", "competente"},
+    "incompleto":    {"recibido", "pendiente", "no_competente", "competente"},
+    "no_competente": {"recibido", "pendiente"},      # requiere re-revisión antes de declarar apto
+    "competente":    {"pendiente", "no_competente"}, # corrección antes de radicar
+    "radicado":      set(),                          # terminal: ninguna transición manual permitida
+}
 
 
 class AdjuntoOut(BaseModel):
@@ -46,6 +57,7 @@ class RecepcionOut(BaseModel):
     canal: CanalResumen
     asunto_provisional: Optional[str]
     observaciones: Optional[str]
+    aviso_adjuntos: Optional[str] = None
     email_remitente: Optional[str]
     estado: str
     recibido_por: Optional[UsuarioResumen]
@@ -84,6 +96,9 @@ class InfoPublicaOut(BaseModel):
     tipos_requerimiento: List[TipoReqResumen] = []
     politica_privacidad_activa: bool = False
     politica_privacidad_texto: Optional[str] = None
+    max_adjuntos: int = 5
+    max_tamano_adjunto_mb: int = 10
+    tipos_archivo_permitidos: List[str] = []
 
 
 class FormularioPublicoCreate(BaseModel):

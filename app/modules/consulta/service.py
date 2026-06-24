@@ -241,7 +241,7 @@ def exportar_csv(
 def estadisticas(db: Session) -> EstadisticasOut:
     total_recepciones = db.query(func.count(Recepcion.id)).scalar() or 0
     total_radicados   = db.query(func.count(Radicado.id)).scalar() or 0
-    vigentes  = db.query(func.count(Radicado.id)).filter(Radicado.estado == "vigente").scalar() or 0
+    vigentes  = db.query(func.count(Radicado.id)).filter(Radicado.estado == "radicado").scalar() or 0
     anulados  = db.query(func.count(Radicado.id)).filter(Radicado.estado == "anulado").scalar() or 0
 
     por_dep = (

@@ -18,8 +18,11 @@ class Recepcion(Base):
     observaciones      = Column(Text)
     email_remitente    = Column(String(200), nullable=True)
 
+    # Aviso de adjuntos rechazados por el poller (campo separado, no toca observaciones)
+    aviso_adjuntos = Column(Text, nullable=True)
+
     # Estado
-    # recibido | en_revision | pendiente | incompleto | no_competente
+    # recibido | pendiente | incompleto | no_competente | competente | radicado
     estado = Column(String(30), default="recibido", nullable=False)
 
     # Trazabilidad

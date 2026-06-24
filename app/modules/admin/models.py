@@ -7,20 +7,37 @@ from app.db.base import Base
 class BuzonCorreo(Base):
     """
     Configuración del buzón oficial de radicación por correo electrónico.
-    Almacena credenciales cifradas con Fernet y parámetros de polling IMAP.
+    Soporta autenticación por contraseña de aplicación (IMAP LOGIN/PLAIN)
+    u OAuth2 (IMAP XOAUTH2) para Gmail y Outlook personal/empresarial.
     """
     __tablename__ = "buzon_correo"
 
     id = Column(Integer, primary_key=True, index=True)
     canal_id = Column(Integer, ForeignKey("canales.id"), nullable=False, unique=True)
-    proveedor = Column(String(20), nullable=False)           # "gmail" | "outlook"
+    proveedor = Column(String(20), nullable=False)              # "gmail" | "outlook"
+    tipo_cuenta = Column(String(20), nullable=False, default="personal")   # "personal" | "empresarial"
+    auth_type = Column(String(20), nullable=False, default="oauth2")
     correo = Column(String(150), nullable=False)
-    password_app_enc = Column(Text, nullable=False)          # Fernet-encrypted
+
+    # Credenciales básicas (auth_type == "password_app")
+    password_app_enc = Column(Text, nullable=True)             # Fernet-encrypted
+
+    # Credenciales OAuth2 (auth_type == "oauth2")
+    oauth_client_id = Column(String(200), nullable=True)
+    oauth_client_secret_enc = Column(Text, nullable=True)      # Fernet-encrypted
+    oauth_tenant_id = Column(String(200), nullable=True)       # Sólo Microsoft 365 (empresarial)
+    oauth_access_token_enc = Column(Text, nullable=True)       # Fernet-encrypted, expira ~1h
+    oauth_refresh_token_enc = Column(Text, nullable=True)      # Fernet-encrypted, larga duración
+    oauth_token_expiry = Column(DateTime, nullable=True)
+    oauth_state = Column(String(100), nullable=True)           # CSRF state del flujo en curso
+
+    # Método de conexión: "imap" (IMAP+XOAUTH2) o "graph" (Microsoft Graph API vía HTTPS)
+    metodo_conexion = Column(String(10), nullable=False, default="imap")
+
+    # IMAP
     servidor_imap = Column(String(100), nullable=False)
     puerto = Column(Integer, default=993, nullable=False)
     intervalo_minutos = Column(Integer, default=5, nullable=False)
-    max_adjuntos = Column(Integer, default=5, nullable=False)
-    max_tamano_adjunto_mb = Column(Integer, default=10, nullable=False)
     activo = Column(Boolean, default=False, nullable=False)
     ultimo_polling = Column(DateTime, nullable=True)
     estado_conexion = Column(String(20), default="sin_probar", nullable=False)
@@ -29,6 +46,10 @@ class BuzonCorreo(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     canal = relationship("Canal")
+
+    @property
+    def oauth_autorizado(self) -> bool:
+        return bool(self.oauth_refresh_token_enc)
 
 
 class BitacoraAuditoria(Base):
@@ -153,5 +174,22 @@ class ConfiguracionSistema(Base):
     sistema_listo = Column(Boolean, default=False, nullable=False)
     # RN-19: política de privacidad obligatoria (Ley 1581/2012)
     politica_privacidad_activa = Column(Boolean, default=False, nullable=False)
-    politica_privacidad_texto = Column(Text, nullable=True)
+    politica_privacidad_texto  = Column(Text, nullable=True)
+    # Parametrización global de adjuntos (formulario público, buzón y recepciones)
+    max_adjuntos             = Column(Integer, default=5,  nullable=False)
+    max_tamano_adjunto_mb    = Column(Integer, default=10, nullable=False)
+    tipos_archivo_permitidos = Column(
+        Text,
+        default=(
+            "application/pdf,"
+            "image/jpeg,"
+            "image/png,"
+            "application/msword,"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+            "application/vnd.ms-excel,"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+            "text/plain"
+        ),
+        nullable=False,
+    )
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)

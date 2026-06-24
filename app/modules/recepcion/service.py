@@ -1,3 +1,4 @@
+import json as _json
 import os
 import uuid
 from collections import defaultdict
@@ -9,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.shared.exceptions import not_found, bad_request
+from app.shared.utils import validar_adjunto, tipos_permitidos_set
 from app.modules.recepcion.models import Recepcion, AdjuntoRecepcion
 from app.modules.recepcion.schemas import (
-    RecepcionCreate, RecepcionUpdate, ESTADOS_VALIDOS,
+    RecepcionCreate, RecepcionUpdate, ESTADOS_VALIDOS, TRANSICIONES_VALIDAS,
     FormularioPublicoCreate, FormularioPublicoOut, InfoPublicaOut, TipoReqResumen,
 )
 from app.modules.admin.models import Canal, Entidad, ConfiguracionSistema, TipoRequerimiento
@@ -47,7 +49,7 @@ def listar_recepciones(
     fecha_desde: Optional[str] = None,
     fecha_hasta: Optional[str] = None,
 ) -> List[Recepcion]:
-    q = db.query(Recepcion)
+    q = db.query(Recepcion).filter(Recepcion.estado != "radicado")
     if canal_id:
         q = q.filter(Recepcion.canal_id == canal_id)
     if estado:
@@ -81,6 +83,11 @@ def crear_recepcion(db: Session, data: RecepcionCreate, usuario_id: Optional[int
     )
     db.add(recepcion)
     db.flush()
+
+    # Asignar número de radicado como referencia de seguimiento desde el inicio
+    from app.modules.radicado.service import _asignar_radicado_inicial
+    _asignar_radicado_inicial(db, recepcion.id)
+
     registrar_evento(
         db,
         accion="crear_recepcion",
@@ -110,19 +117,30 @@ def actualizar_recepcion(
     if data.estado and data.estado not in ESTADOS_VALIDOS:
         bad_request(f"Estado no válido. Use uno de: {', '.join(ESTADOS_VALIDOS)}")
 
-    if data.estado and db.query(Radicado).filter(Radicado.recepcion_id == recepcion_id).first():
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede cambiar el estado de una recepción que ya fue radicada",
-        )
+    if data.estado:
+        radicado_existente = db.query(Radicado).filter(Radicado.recepcion_id == recepcion_id).first()
+        if radicado_existente and radicado_existente.estado == "radicado":
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede cambiar el estado de una recepción que ya fue radicada",
+            )
+
+    estado_anterior = recepcion.estado
+
+    if data.estado and data.estado != estado_anterior:
+        permitidos = TRANSICIONES_VALIDAS.get(estado_anterior, set())
+        if data.estado not in permitidos:
+            bad_request(
+                f"Transición no permitida: '{estado_anterior}' → '{data.estado}'. "
+                f"Desde '{estado_anterior}' solo se puede pasar a: "
+                f"{', '.join(sorted(permitidos)) if permitidos else 'ningún estado (terminal)'}."
+            )
 
     if data.estado in ESTADOS_REQUIEREN_OBS and not data.observaciones:
         bad_request(
             "Las observaciones son obligatorias al marcar como "
             f"'{data.estado}'. Indique el motivo."
         )
-
-    estado_anterior = recepcion.estado
 
     for campo, valor in data.model_dump(exclude_none=True).items():
         setattr(recepcion, campo, valor)
@@ -160,6 +178,23 @@ async def guardar_adjunto(
                    "Los documentos solo se adjuntan durante el registro inicial.",
         )
 
+    config = db.query(ConfiguracionSistema).first()
+    contenido = await archivo.read()
+
+    validar_adjunto(
+        mime_type=archivo.content_type or "application/octet-stream",
+        tamano_bytes=len(contenido),
+        max_tamano_mb=config.max_tamano_adjunto_mb if config else 10,
+        tipos_permitidos=config.tipos_archivo_permitidos if config else "",
+    )
+
+    adjuntos_actuales = db.query(AdjuntoRecepcion).filter(
+        AdjuntoRecepcion.recepcion_id == recepcion_id
+    ).count()
+    max_adj = config.max_adjuntos if config else 5
+    if adjuntos_actuales >= max_adj:
+        bad_request(f"Se ha alcanzado el límite máximo de {max_adj} adjuntos por recepción.")
+
     # Crear carpeta si no existe
     carpeta = os.path.join(settings.STORAGE_PATH, "adjuntos", str(recepcion_id))
     os.makedirs(carpeta, exist_ok=True)
@@ -169,8 +204,6 @@ async def guardar_adjunto(
     nombre_disco = f"{uuid.uuid4().hex}{ext}"
     ruta_completa = os.path.join(carpeta, nombre_disco)
 
-    # Guardar archivo
-    contenido = await archivo.read()
     with open(ruta_completa, "wb") as f:
         f.write(contenido)
 
@@ -251,6 +284,9 @@ def get_info_publica(db: Session) -> InfoPublicaOut:
         tipos_requerimiento=[TipoReqResumen.model_validate(t) for t in tipos],
         politica_privacidad_activa=config.politica_privacidad_activa if config else False,
         politica_privacidad_texto=config.politica_privacidad_texto if config else None,
+        max_adjuntos=config.max_adjuntos if config else 5,
+        max_tamano_adjunto_mb=config.max_tamano_adjunto_mb if config else 10,
+        tipos_archivo_permitidos=list(tipos_permitidos_set(config.tipos_archivo_permitidos)) if config else [],
     )
 
 
@@ -303,6 +339,11 @@ async def crear_desde_formulario(
         db.add(remitente)
         db.flush()
 
+    # Determinar campos que provienen del formulario y no deben editarse manualmente
+    bloqueados = ["asunto", "remitente_id", "tipo_soporte"]
+    if data.tipo_requerimiento_id:
+        bloqueados.append("tipo_requerimiento_id")
+
     # Crear metadatos
     metadatos = MetadatosRecepcion(
         recepcion_id=recepcion.id,
@@ -311,21 +352,38 @@ async def crear_desde_formulario(
         tipo_soporte="digital",
         tipo_requerimiento_id=data.tipo_requerimiento_id,
         observaciones=data.observaciones,
+        campos_bloqueados=_json.dumps(bloqueados),
     )
     db.add(metadatos)
+    db.flush()
+
+    # Asignar número de radicado como referencia de seguimiento desde el inicio
+    from app.modules.radicado.service import _asignar_radicado_inicial
+    _asignar_radicado_inicial(db, recepcion.id)
+
     db.commit()
     db.refresh(recepcion)
 
     # Guardar adjuntos si los hay
     archivos_validos = [a for a in adjuntos if a.filename]
     if archivos_validos:
+        max_adj = config.max_adjuntos if config else 5
+        if len(archivos_validos) > max_adj:
+            bad_request(f"Se permiten máximo {max_adj} adjuntos por envío.")
+
         carpeta = os.path.join(settings.STORAGE_PATH, "adjuntos", str(recepcion.id))
         os.makedirs(carpeta, exist_ok=True)
         for archivo in archivos_validos:
+            contenido = await archivo.read()
+            validar_adjunto(
+                mime_type=archivo.content_type or "application/octet-stream",
+                tamano_bytes=len(contenido),
+                max_tamano_mb=config.max_tamano_adjunto_mb if config else 10,
+                tipos_permitidos=config.tipos_archivo_permitidos if config else "",
+            )
             ext = os.path.splitext(archivo.filename or "")[1]
             nombre_disco = f"{uuid.uuid4().hex}{ext}"
             ruta_completa = os.path.join(carpeta, nombre_disco)
-            contenido = await archivo.read()
             with open(ruta_completa, "wb") as f:
                 f.write(contenido)
             db.add(AdjuntoRecepcion(
@@ -348,3 +406,80 @@ async def crear_desde_formulario(
         )
 
     return FormularioPublicoOut(acuse_enviado=acuse_enviado)
+
+
+# ── Notificación de adjuntos rechazados ────────────────────────────────────────
+
+_MIME_LABEL: dict[str, str] = {
+    "application/pdf": "PDF",
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/gif": "GIF",
+    "application/msword": "Word",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
+    "application/vnd.ms-excel": "Excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel",
+    "text/plain": "TXT",
+    "application/rtf": "RTF",
+    "application/zip": "ZIP",
+}
+
+
+def notificar_adjuntos(
+    db: Session,
+    recepcion_id: int,
+    usuario_id: Optional[int] = None,
+    ip: Optional[str] = None,
+) -> bool:
+    from app.shared.email_service import enviar_aviso_adjuntos
+
+    recepcion = obtener_recepcion(db, recepcion_id)
+
+    if not recepcion.aviso_adjuntos:
+        bad_request("Esta recepción no tiene avisos de adjuntos pendientes.")
+
+    if not recepcion.email_remitente:
+        bad_request("Esta recepción no tiene correo electrónico del remitente. No se puede enviar el aviso.")
+
+    config = db.query(ConfiguracionSistema).first()
+    entidad = db.query(Entidad).first()
+
+    max_adj = config.max_adjuntos if config else 5
+    max_mb  = config.max_tamano_adjunto_mb if config else 10
+    tipos_raw = config.tipos_archivo_permitidos if config else ""
+    tipos_set = tipos_permitidos_set(tipos_raw)
+
+    seen: set[str] = set()
+    tipos_legibles: list[str] = []
+    for mime in tipos_set:
+        label = _MIME_LABEL.get(mime, mime)
+        if label not in seen:
+            seen.add(label)
+            tipos_legibles.append(label)
+
+    avisos = [a.strip() for a in recepcion.aviso_adjuntos.split("\n") if a.strip()]
+
+    enviado = enviar_aviso_adjuntos(
+        destinatario=recepcion.email_remitente,
+        asunto_recepcion=recepcion.asunto_provisional or "(sin asunto)",
+        entidad_nombre=entidad.nombre if entidad else "la entidad",
+        avisos=avisos,
+        max_adjuntos=max_adj,
+        max_mb=max_mb,
+        tipos_legibles=tipos_legibles,
+    )
+
+    if enviado:
+        recepcion.aviso_adjuntos = None
+        registrar_evento(
+            db,
+            accion="notificar_adjuntos",
+            modulo="recepciones",
+            modulo_id=recepcion_id,
+            descripcion=f"Aviso de adjuntos rechazados enviado a {recepcion.email_remitente}",
+            usuario_id=usuario_id,
+            ip=ip,
+        )
+        db.commit()
+
+    return enviado

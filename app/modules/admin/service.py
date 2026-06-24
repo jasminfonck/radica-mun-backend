@@ -14,13 +14,38 @@ from app.modules.admin.schemas import (
     UsuarioCreate, UsuarioUpdate, EntidadUpdate, DependenciaCreate,
     DependenciaUpdate, CanalUpdate, TipoRequerimientoCreate,
     TipoRequerimientoUpdate, PlazoRespuestaCreate, PlazoRespuestaUpdate,
-    ConfiguracionUpdate, BuzonCorreoCreate, BuzonCorreoUpdate,
+    ConfiguracionUpdate, BuzonCorreoCreate, BuzonCorreoUpdate, OAuthCompletarIn,
 )
 
-_SERVIDORES_IMAP = {
-    "gmail": "imap.gmail.com",
-    "outlook": "imap-mail.outlook.com",
+_IMAP_SERVERS = {
+    ("gmail",   "personal"):    ("imap.gmail.com",         993),
+    ("gmail",   "empresarial"): ("imap.gmail.com",         993),
+    # Microsoft unificó IMAP en outlook.office365.com para autenticación moderna
+    # (OAuth2 y contraseñas de aplicación). imap-mail.outlook.com es solo legacy.
+    ("outlook", "personal"):    ("outlook.office365.com",  993),
+    ("outlook", "empresarial"): ("outlook.office365.com",  993),
 }
+
+_OAUTH_AUTH_URLS = {
+    ("outlook", "personal"):    "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
+    ("outlook", "empresarial"): "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize",
+    ("gmail",   "personal"):    "https://accounts.google.com/o/oauth2/v2/auth",
+    ("gmail",   "empresarial"): "https://accounts.google.com/o/oauth2/v2/auth",
+}
+
+_OAUTH_SCOPES = {
+    ("outlook", "imap"):  "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
+    ("outlook", "graph"): "Mail.Read offline_access",
+    "gmail":              "https://mail.google.com/",
+}
+
+
+def _resolver_servidor(proveedor: str, tipo_cuenta: str) -> tuple[str, int]:
+    key = (proveedor, tipo_cuenta)
+    entry = _IMAP_SERVERS.get(key)
+    if not entry:
+        bad_request(f"Combinación proveedor/tipo_cuenta no soportada: {proveedor}/{tipo_cuenta}")
+    return entry
 
 
 # ── Bitácora de auditoría ─────────────────────────────────────────────────
@@ -230,6 +255,21 @@ def actualizar_canal(db: Session, canal_id: int, data: CanalUpdate, actor_id: in
                 "de acuse de recibo automático al ciudadano (RN-20)"
             )
 
+    # Canal email: sincronizar buzón en cascada
+    if canal.tipo == "email":
+        buzon = db.query(BuzonCorreo).filter(BuzonCorreo.canal_id == canal_id).first()
+        if data.activo:
+            if not buzon:
+                bad_request("Configure el buzón de correo antes de activar este canal.")
+            if buzon.estado_conexion != "ok":
+                bad_request("Pruebe la conexión del buzón antes de activar el canal.")
+            if not buzon.oauth_autorizado:
+                bad_request("Autorice el acceso OAuth2 del buzón antes de activar el canal.")
+            buzon.activo = True
+        else:
+            if buzon:
+                buzon.activo = False
+
     anterior = {"activo": canal.activo}
     canal.activo = data.activo
     if data.config_email is not None:
@@ -386,53 +426,82 @@ def crear_buzon_correo(db: Session, data: BuzonCorreoCreate, actor_id: int, acto
     if not canal:
         not_found("Canal de tipo email")
 
-    servidor = _SERVIDORES_IMAP.get(data.proveedor)
-    if not servidor:
-        bad_request("Proveedor no soportado. Use 'gmail' o 'outlook'")
+    servidor, puerto = _resolver_servidor(data.proveedor, data.tipo_cuenta)
 
     buzon = BuzonCorreo(
         canal_id=data.canal_id,
         proveedor=data.proveedor,
+        tipo_cuenta=data.tipo_cuenta,
+        metodo_conexion=data.metodo_conexion,
+        auth_type="oauth2",
         correo=str(data.correo),
-        password_app_enc=encrypt(data.password_app),
         servidor_imap=servidor,
-        puerto=993,
+        puerto=puerto,
         intervalo_minutos=data.intervalo_minutos,
-        max_adjuntos=data.max_adjuntos,
-        max_tamano_adjunto_mb=data.max_tamano_adjunto_mb,
+        oauth_client_id=data.oauth_client_id,
+        oauth_client_secret_enc=encrypt(data.oauth_client_secret),
+        oauth_tenant_id=data.oauth_tenant_id,
     )
+
     db.add(buzon)
     db.flush()
     registrar_auditoria(
         db, accion="crear_buzon_correo", modulo="BuzonCorreo",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
         modulo_id=buzon.id,
-        detalle={"correo": str(data.correo), "proveedor": data.proveedor},
+        detalle={"correo": str(data.correo), "proveedor": data.proveedor, "tipo_cuenta": data.tipo_cuenta},
     )
     db.commit()
     db.refresh(buzon)
     return buzon
+
 
 def actualizar_buzon_correo(db: Session, buzon_id: int, data: BuzonCorreoUpdate, actor_id: int, actor_nombre: str) -> BuzonCorreo:
     buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
     if not buzon:
         not_found("Buzón de correo")
 
-    if data.password_app:
-        buzon.password_app_enc = encrypt(data.password_app)
+    if data.proveedor:
+        buzon.proveedor = data.proveedor
+    if data.tipo_cuenta:
+        buzon.tipo_cuenta = data.tipo_cuenta
+
+    servidor_correcto, puerto_correcto = _resolver_servidor(buzon.proveedor, buzon.tipo_cuenta)
+    if servidor_correcto != buzon.servidor_imap or puerto_correcto != buzon.puerto:
+        buzon.servidor_imap = servidor_correcto
+        buzon.puerto = puerto_correcto
         buzon.estado_conexion = "sin_probar"
+
+    if data.metodo_conexion is not None and data.metodo_conexion != buzon.metodo_conexion:
+        buzon.metodo_conexion = data.metodo_conexion
+        buzon.oauth_access_token_enc = None
+        buzon.oauth_refresh_token_enc = None
+        buzon.oauth_token_expiry = None
+        buzon.oauth_state = None
+        buzon.estado_conexion = "sin_probar"
+    if data.correo is not None:
+        buzon.correo = data.correo
+        buzon.estado_conexion = "sin_probar"
+    if data.oauth_client_id is not None:
+        buzon.oauth_client_id = data.oauth_client_id
+        buzon.estado_conexion = "sin_probar"
+    if data.oauth_client_secret:
+        buzon.oauth_client_secret_enc = encrypt(data.oauth_client_secret)
+        buzon.oauth_access_token_enc = None
+        buzon.oauth_refresh_token_enc = None
+        buzon.oauth_token_expiry = None
+        buzon.oauth_state = None
+        buzon.estado_conexion = "sin_probar"
+    if data.oauth_tenant_id is not None:
+        buzon.oauth_tenant_id = data.oauth_tenant_id
     if data.intervalo_minutos is not None:
         buzon.intervalo_minutos = data.intervalo_minutos
-    if data.max_adjuntos is not None:
-        buzon.max_adjuntos = data.max_adjuntos
-    if data.max_tamano_adjunto_mb is not None:
-        buzon.max_tamano_adjunto_mb = data.max_tamano_adjunto_mb
 
     registrar_auditoria(
         db, accion="actualizar_buzon_correo", modulo="BuzonCorreo",
         usuario_id=actor_id, usuario_nombre=actor_nombre,
         modulo_id=buzon_id,
-        detalle={"actualizado": data.model_dump(exclude_none=True, exclude={"password_app"})},
+        detalle={"actualizado": data.model_dump(exclude_none=True, exclude={"oauth_client_secret"})},
     )
     db.commit()
     db.refresh(buzon)
@@ -462,24 +531,157 @@ def activar_buzon(db: Session, buzon_id: int, activo: bool, actor_id: int, actor
     return buzon
 
 def probar_conexion_buzon(db: Session, buzon_id: int) -> dict:
-    from app.modules.recepcion.email_poller import probar_conexion_imap
+    from app.modules.recepcion.email_poller import (
+        probar_conexion_graph,
+        probar_conexion_imap_oauth,
+        refrescar_token_si_necesario,
+    )
 
     buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
     if not buzon:
         not_found("Buzón de correo")
 
     try:
-        password = decrypt(buzon.password_app_enc)
-        probar_conexion_imap(buzon.servidor_imap, buzon.puerto, buzon.correo, password)
+        if not buzon.oauth_refresh_token_enc and not buzon.oauth_access_token_enc:
+            bad_request(
+                "El buzón no ha sido autorizado. "
+                "Use el botón 'Autorizar OAuth2' para completar la autorización."
+            )
+        access_token = refrescar_token_si_necesario(buzon, db)
+        metodo = getattr(buzon, "metodo_conexion", "imap")
+        if metodo == "graph":
+            probar_conexion_graph(access_token)
+            mensaje = "Conexión exitosa a Microsoft Graph API"
+        else:
+            probar_conexion_imap_oauth(buzon.servidor_imap, buzon.puerto, buzon.correo, access_token)
+            mensaje = "Conexión exitosa al buzón IMAP"
+
         buzon.estado_conexion = "ok"
         buzon.ultimo_error = None
         db.commit()
-        return {"ok": True, "mensaje": "Conexión exitosa al buzón IMAP"}
+        return {"ok": True, "mensaje": mensaje}
     except Exception as e:
         buzon.estado_conexion = "error"
         buzon.ultimo_error = str(e)[:500]
         db.commit()
         return {"ok": False, "mensaje": str(e)}
+
+
+def iniciar_oauth_buzon(db: Session, buzon_id: int) -> dict:
+    """
+    Genera la URL de autorización OAuth2 para que el admin la abra en el navegador.
+    Almacena el 'state' para verificación CSRF en el callback.
+    """
+    import secrets
+    import urllib.parse
+    from app.core.config import settings
+
+    buzon = db.query(BuzonCorreo).filter(BuzonCorreo.id == buzon_id).first()
+    if not buzon:
+        not_found("Buzón de correo")
+    if buzon.auth_type != "oauth2":
+        buzon.auth_type = "oauth2"
+    if not buzon.oauth_client_id:
+        bad_request("Falta oauth_client_id en la configuración del buzón")
+
+    key = (buzon.proveedor, buzon.tipo_cuenta)
+    auth_base = _OAUTH_AUTH_URLS.get(key)
+    if not auth_base:
+        bad_request(f"OAuth2 no soportado para {buzon.proveedor}/{buzon.tipo_cuenta}")
+
+    if buzon.proveedor == "outlook" and buzon.tipo_cuenta == "empresarial":
+        tenant = buzon.oauth_tenant_id or "organizations"
+        auth_base = auth_base.replace("{tenant}", tenant)
+
+    state = secrets.token_urlsafe(32)
+    if buzon.proveedor == "outlook":
+        metodo = getattr(buzon, "metodo_conexion", "imap")
+        scope = _OAUTH_SCOPES[("outlook", metodo)]
+    else:
+        scope = _OAUTH_SCOPES["gmail"]
+
+    params: dict = {
+        "client_id": buzon.oauth_client_id,
+        "response_type": "code",
+        "redirect_uri": settings.OAUTH_REDIRECT_URI,
+        "scope": scope,
+        "state": state,
+        "response_mode": "query",
+    }
+    if buzon.proveedor == "gmail":
+        params["access_type"] = "offline"
+        params["prompt"] = "consent"
+
+    url = auth_base + "?" + urllib.parse.urlencode(params)
+    buzon.oauth_state = state
+    db.commit()
+
+    return {
+        "url": url,
+        "mensaje": (
+            "Abre esta URL en el navegador. Tras autorizar, Microsoft/Google "
+            f"redirigirá a {settings.OAUTH_REDIRECT_URI}. "
+            "El frontend debe enviar code+state al endpoint /oauth/completar."
+        ),
+    }
+
+
+def completar_oauth_buzon(db: Session, data: OAuthCompletarIn) -> dict:
+    """
+    Recibe el code y state del callback OAuth2, intercambia el code por tokens
+    y los almacena cifrados en el buzón.
+    """
+    import requests as req
+    from datetime import timedelta
+    from app.core.config import settings
+
+    buzon = db.query(BuzonCorreo).filter(BuzonCorreo.oauth_state == data.state).first()
+    if not buzon:
+        bad_request("Estado OAuth inválido o expirado. Reinicie el flujo de autorización.")
+
+    if buzon.proveedor == "outlook":
+        if buzon.tipo_cuenta == "personal":
+            token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+        else:
+            tenant = buzon.oauth_tenant_id or "organizations"
+            token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+    else:
+        token_url = "https://oauth2.googleapis.com/token"
+
+    client_secret = decrypt(buzon.oauth_client_secret_enc)
+
+    resp = req.post(token_url, data={
+        "client_id": buzon.oauth_client_id,
+        "client_secret": client_secret,
+        "code": data.code,
+        "redirect_uri": settings.OAUTH_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }, timeout=30)
+
+    if not resp.ok:
+        err = resp.json()
+        msg = err.get("error_description") or err.get("error") or resp.text
+        buzon.estado_conexion = "error"
+        buzon.ultimo_error = f"OAuth error: {msg}"[:500]
+        buzon.oauth_state = None
+        db.commit()
+        bad_request(f"Error al obtener tokens OAuth: {msg}")
+
+    from datetime import datetime, timezone
+    token_data = resp.json()
+    access_token = token_data["access_token"]
+    refresh_token = token_data.get("refresh_token", "")
+    expires_in = token_data.get("expires_in", 3600)
+
+    buzon.oauth_access_token_enc = encrypt(access_token)
+    if refresh_token:
+        buzon.oauth_refresh_token_enc = encrypt(refresh_token)
+    buzon.oauth_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    buzon.oauth_state = None
+    buzon.estado_conexion = "sin_probar"
+    db.commit()
+
+    return {"ok": True, "mensaje": "OAuth autorizado correctamente. Ahora puede probar la conexión."}
 
 
 # ── Respaldo ──────────────────────────────────────────────────────────────

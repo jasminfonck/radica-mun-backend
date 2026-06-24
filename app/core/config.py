@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     ENCRYPTION_KEY: str = ""
 
+    # URI de redirección OAuth2. Debe estar registrada en Azure AD / Google Cloud Console.
+    # El backend maneja el callback directamente (no requiere frontend).
+    OAUTH_REDIRECT_URI: str = "http://localhost:8000/admin/buzon-correo/oauth/callback"
+
     class Config:
         env_file = ".env"
 

@@ -62,6 +62,10 @@ class MetadatosRecepcion(Base):
     numero_referencia   = Column(String(100))
     fecha_documento     = Column(DateTime)
 
+    # JSON array de nombres de campo que el sistema llenó y no deben editarse manualmente
+    # Ej: '["asunto","remitente_id","tipo_soporte","tipo_requerimiento_id"]'
+    campos_bloqueados = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=datetime.utcnow, nullable=False)
 

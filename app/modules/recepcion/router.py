@@ -43,7 +43,7 @@ def bitacora_recepcion(
     return (
         db.query(BitacoraOperativa)
         .filter(BitacoraOperativa.modulo == "recepciones", BitacoraOperativa.modulo_id == recepcion_id)
-        .order_by(LogAuditoria.created_at.desc())
+        .order_by(BitacoraOperativa.created_at.desc())
         .all()
     )
 
@@ -134,6 +134,18 @@ async def subir_adjunto(
     _=Depends(get_current_user),
 ):
     return await service.guardar_adjunto(db, recepcion_id, archivo, fase_creacion)
+
+
+@router.post("/{recepcion_id}/notificar-adjuntos")
+def notificar_adjuntos(
+    recepcion_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    ip = request.client.host if request.client else None
+    enviado = service.notificar_adjuntos(db, recepcion_id, current_user.id, ip)
+    return {"enviado": enviado}
 
 
 @router.delete("/{recepcion_id}/adjuntos/{adjunto_id}", status_code=405)
